@@ -217,8 +217,6 @@ def _run_hub(args: argparse.Namespace) -> None:
     import logging
     import os
 
-    _kill_port(args.port)
-
     import uvicorn
 
     logging.basicConfig(
@@ -264,8 +262,6 @@ def _run_daemon(args: argparse.Namespace) -> None:
     import asyncio
     import logging
     import signal
-
-    _kill_port(args.port)
 
     from switch.daemon.registration import HubRegistration
     from switch.daemon.session_manager import SessionManager
