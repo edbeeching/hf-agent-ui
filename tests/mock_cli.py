@@ -20,8 +20,15 @@ def main() -> None:
         except json.JSONDecodeError:
             continue
 
-        if msg.get("type") == "user_message":
+        # Accept both formats: {"type":"user","message":{"role":"user","content":"..."}}
+        # and legacy {"type":"user_message","content":"..."}
+        content = None
+        if msg.get("type") == "user" and isinstance(msg.get("message"), dict):
+            content = msg["message"].get("content", "")
+        elif msg.get("type") == "user_message":
             content = msg.get("content", "")
+
+        if content is not None:
             # Echo back as a stream_event with content_block_delta
             emit({
                 "type": "stream_event",

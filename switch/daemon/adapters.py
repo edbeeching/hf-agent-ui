@@ -60,7 +60,7 @@ class ClaudeAdapter(ToolAdapter):
         return args
 
     def format_user_message(self, message: str) -> str | None:
-        return json.dumps({"type": "user_message", "content": message})
+        return json.dumps({"type": "user", "message": {"role": "user", "content": message}})
 
     def format_control_response(self, response: dict[str, Any]) -> str | None:
         return json.dumps(response)
