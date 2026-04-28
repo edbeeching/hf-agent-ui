@@ -9,7 +9,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PRUNE_TIMEOUT_SECONDS = 90
+PRUNE_TIMEOUT_SECONDS = 45
 
 
 @dataclass

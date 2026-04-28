@@ -53,7 +53,16 @@ export function useSwitch() {
     try {
       const res = await fetch('/api/daemons')
       const daemons: Daemon[] = await res.json()
-      setState(s => ({ ...s, daemons }))
+      setState(s => {
+        const daemonIds = new Set(daemons.map(daemon => daemon.id))
+        const sessions = new Map(s.sessions)
+        for (const daemonId of sessions.keys()) {
+          if (!daemonIds.has(daemonId)) {
+            sessions.delete(daemonId)
+          }
+        }
+        return { ...s, daemons, sessions }
+      })
     } catch {
       // Hub not available
     }
@@ -157,6 +166,21 @@ export function useSwitch() {
         break
       }
 
+      case 'session.removed': {
+        if (!daemonId || !sessionId) return
+        setState(s => {
+          const sessions = new Map(s.sessions)
+          const list = sessions.get(daemonId) || []
+          sessions.set(daemonId, list.filter(session => session.id !== sessionId))
+
+          const ptyOutput = new Map(s.ptyOutput)
+          ptyOutput.delete(sessionId)
+
+          return { ...s, sessions, ptyOutput }
+        })
+        break
+      }
+
       case 'session.input_required': {
         if (!sessionId) return
         updateSessionInputRequired(sessionId, true, msg.reason || 'Human input required')
@@ -202,7 +226,7 @@ export function useSwitch() {
 
     connect()
 
-    const interval = setInterval(fetchDaemons, 10000)
+    const interval = setInterval(fetchDaemons, 3000)
 
     return () => {
       disposed = true
@@ -241,6 +265,20 @@ export function useSwitch() {
     send({ type: 'session.stop', daemonId, sessionId })
   }, [send])
 
+  const removeSession = useCallback((daemonId: string, sessionId: string) => {
+    send({ type: 'session.remove', daemonId, sessionId })
+    setState(s => {
+      const sessions = new Map(s.sessions)
+      const list = sessions.get(daemonId) || []
+      sessions.set(daemonId, list.filter(session => session.id !== sessionId))
+
+      const ptyOutput = new Map(s.ptyOutput)
+      ptyOutput.delete(sessionId)
+
+      return { ...s, sessions, ptyOutput }
+    })
+  }, [send])
+
   const listSessions = useCallback((daemonId: string) => {
     send({ type: 'session.list', daemonId })
   }, [send])
@@ -255,6 +293,7 @@ export function useSwitch() {
     sendPtyInput,
     resizePty,
     stopSession,
+    removeSession,
     listSessions,
     subscribeSession,
     fetchDaemons,

@@ -230,6 +230,44 @@
   white-space: nowrap;
 }
 
+.session-context-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 140px;
+  padding: 4px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.session-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #e6edf3;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-context-menu button:hover:not(:disabled) {
+  background: #30363d;
+}
+
+.session-context-menu button:disabled {
+  color: #6e7681;
+  cursor: default;
+}
+
+.session-context-menu button.danger {
+  color: #ff7b72;
+}
+
 /* Main panel */
 .main-panel {
   flex: 1;
@@ -304,6 +342,10 @@
 .dialog textarea:focus {
   outline: none;
   border-color: #1f6feb;
+}
+
+.recent-dir-select {
+  margin-bottom: 8px;
 }
 
 .dialog-actions {

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { Daemon, SessionInfo } from '../hooks/useSwitch'
 
 interface Props {
@@ -6,9 +7,37 @@ interface Props {
   selectedSession: { daemonId: string; sessionId: string } | null
   onSelectSession: (daemonId: string, sessionId: string) => void
   onNewSession: (daemonId: string) => void
+  onCloseSession: (daemonId: string, sessionId: string) => void
 }
 
-export function DaemonList({ daemons, sessions, selectedSession, onSelectSession, onNewSession }: Props) {
+interface ContextMenuState {
+  daemonId: string
+  sessionId: string
+  x: number
+  y: number
+}
+
+export function DaemonList({
+  daemons,
+  sessions,
+  selectedSession,
+  onSelectSession,
+  onNewSession,
+  onCloseSession,
+}: Props) {
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = () => setContextMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('contextmenu', close)
+    }
+  }, [contextMenu])
+
   return (
     <div className="daemon-list">
       <div className="daemon-list-header">
@@ -38,6 +67,16 @@ export function DaemonList({ daemons, sessions, selectedSession, onSelectSession
                 key={session.id}
                 className={`session-item ${selectedSession?.sessionId === session.id ? 'selected' : ''} ${session.needs_input ? 'needs-input' : ''}`}
                 onClick={() => onSelectSession(daemon.id, session.id)}
+                onContextMenu={event => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setContextMenu({
+                    daemonId: daemon.id,
+                    sessionId: session.id,
+                    x: event.clientX,
+                    y: event.clientY,
+                  })
+                }}
                 title={session.needs_input ? session.needs_input_reason || 'Human input required' : undefined}
               >
                 <span className={`status-dot ${session.status}`} />
@@ -50,6 +89,27 @@ export function DaemonList({ daemons, sessions, selectedSession, onSelectSession
           </div>
         )
       })}
+      {contextMenu && (
+        <div
+          className="session-context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={event => event.stopPropagation()}
+        >
+          <button type="button" disabled>Rename</button>
+          <button type="button" disabled>Duplicate</button>
+          <button type="button" disabled>Copy path</button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => {
+              onCloseSession(contextMenu.daemonId, contextMenu.sessionId)
+              setContextMenu(null)
+            }}
+          >
+            Close
+          </button>
+        </div>
+      )}
     </div>
   )
 }

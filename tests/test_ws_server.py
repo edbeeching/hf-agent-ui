@@ -175,6 +175,35 @@ async def test_stop_session_via_ws(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_remove_session_via_ws(tmp_path: Path) -> None:
+    """session.remove should stop and remove the PTY session."""
+    manager = SessionManager()
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "mock"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            await ws.send(json.dumps({"type": "session.remove", "sessionId": session_id}))
+            msgs = await _recv_until(ws, lambda m: m.get("type") == "session.removed")
+
+            removed = next(m for m in msgs if m["type"] == "session.removed")
+            assert removed["sessionId"] == session_id
+            assert manager.get(session_id) is None
+
+            msgs = await _send_recv(ws, {"type": "session.list"})
+            list_msg = next(m for m in msgs if m["type"] == "session.list")
+            assert list_msg["sessions"] == []
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_input_required_event_and_clear_via_ws(tmp_path: Path) -> None:
     """Prompt-like output should mark input required until the user types."""
     manager = SessionManager()
