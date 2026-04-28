@@ -145,11 +145,22 @@ def _run_hub(args: argparse.Namespace) -> None:
         datefmt="%H:%M:%S",
     )
 
+    hub_url = f"http://{args.host}:{args.port}"
+    if args.host == "0.0.0.0":
+        hub_url = f"http://localhost:{args.port}"
+
+    print()
+    print(f"  [switch hub] To connect daemons:")
+    print(f"    switch daemon --hub {hub_url}")
+    print()
     if args.dev:
         os.environ["SWITCH_DEV"] = "1"
-        print("[switch hub] Dev mode — Python auto-reload enabled")
-        print("[switch hub] Run 'cd switch/web && npm run dev' in another terminal for frontend hot reload")
-        print(f"[switch hub] Then open http://localhost:5173 (Vite proxies API/WS to :{args.port})")
+        print(f"  [switch hub] Dev mode — Python auto-reload enabled")
+        print(f"  [switch hub] Run 'cd switch/web && npm run dev' for frontend hot reload")
+        print(f"  [switch hub] Open http://localhost:5173")
+    else:
+        print(f"  [switch hub] Open {hub_url}")
+    print()
 
     uvicorn.run(
         "switch.hub.app:app",
