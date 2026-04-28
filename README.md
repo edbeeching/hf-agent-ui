@@ -17,6 +17,12 @@ Browser <--WS--> Hub (FastAPI) <--WS--> Daemon (Python) <--stdio--> Claude / Cod
 uv tool install git+https://github.com/edbeeching/switch.git
 ```
 
+To update:
+
+```bash
+uv tool install --force --reinstall git+https://github.com/edbeeching/switch.git
+```
+
 ## Quick Start
 
 ```bash
