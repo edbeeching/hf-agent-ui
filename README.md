@@ -43,6 +43,21 @@ switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]  Start a daemon (default :93
 switch update                                        Update to the latest version
 ```
 
+## Development
+
+```bash
+git clone git@github.com:edbeeching/switch.git
+cd switch
+uv tool install --force --editable .
+```
+
+This links the `switch` command to your local checkout — Python changes take effect immediately. To rebuild the web UI after frontend changes:
+
+```bash
+cd switch/web && npm install && npm run build
+cp -r dist/* ../hub/static/
+```
+
 ## Supported Tools
 
 | Tool | Status | Notes |
