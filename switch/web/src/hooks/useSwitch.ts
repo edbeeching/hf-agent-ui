@@ -36,7 +36,6 @@ interface ServerMessage {
   session?: SessionInfo
   sessions?: SessionInfo[]
   data?: unknown
-  ptyOutput?: string[]
   reason?: string
   source?: string
 }
@@ -128,9 +127,7 @@ export function useSwitch() {
           sessions.set(daemonId, upsertSession(list, session))
 
           const ptyOutput = new Map(s.ptyOutput)
-          if (Array.isArray(msg.ptyOutput)) {
-            ptyOutput.set(session.id, msg.ptyOutput)
-          }
+          ptyOutput.set(session.id, [])
 
           return { ...s, sessions, ptyOutput }
         })

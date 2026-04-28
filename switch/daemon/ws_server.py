@@ -35,7 +35,7 @@ class DaemonWsServer:
       { type: "pty.exit", sessionId, code }
       { type: "session.input_required", sessionId, reason, source }
       { type: "session.input_resolved", sessionId }
-      { type: "session.subscribed", session, ptyOutput? }
+      { type: "session.subscribed", session }
       { type: "session.list", sessions: [...] }
       { type: "error", message, requestType? }
     """
@@ -124,9 +124,14 @@ class DaemonWsServer:
                     "type": "session.subscribed",
                     "session": json.loads(json.dumps(session.to_info().__dict__, default=str)),
                 }
-                if isinstance(session, PtySession):
-                    payload["ptyOutput"] = session.get_output_buffer()
                 await self._send(ws, payload)
+                if isinstance(session, PtySession):
+                    for chunk in session.get_output_buffer():
+                        await self._send(ws, {
+                            "type": "pty.output",
+                            "sessionId": session.id,
+                            "data": chunk,
+                        })
 
             case "session.stop":
                 if not self.manager.stop(req.get("sessionId", "")):

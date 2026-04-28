@@ -241,7 +241,7 @@ async def test_subscribe_replays_buffered_pty_output(tmp_path: Path) -> None:
                 "sessionId": session_id,
             })
             subscribed = next(m for m in msgs if m["type"] == "session.subscribed")
-            output = "".join(subscribed["ptyOutput"])
+            output = "".join(m.get("data", "") for m in msgs if m.get("type") == "pty.output")
             assert subscribed["session"]["id"] == session_id
             assert "buffer me" in output
     finally:
