@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 type EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
+MAX_OUTPUT_BUFFER_BYTES = 1_000_000
+
 TOOL_COMMANDS: dict[str, list[str]] = {
     "claude": ["claude"],
     "codex": ["codex"],
@@ -72,6 +74,8 @@ class PtySession:
         self._hook_task: asyncio.Task | None = None
         self._callbacks: list[EventCallback] = []
         self._recent_output = ""
+        self._output_buffer: list[str] = []
+        self._output_buffer_bytes = 0
 
     def on_event(self, cb: EventCallback) -> None:
         self._callbacks.append(cb)
@@ -138,6 +142,7 @@ class PtySession:
                     )
                     if data:
                         text = data.decode("utf-8", errors="replace")
+                        self._append_output(text)
                         await self._emit({
                             "type": "pty.output",
                             "sessionId": self.id,
@@ -216,6 +221,17 @@ class PtySession:
             needs_input=self.needs_input,
             needs_input_reason=self.needs_input_reason,
         )
+
+    def get_output_buffer(self) -> list[str]:
+        return list(self._output_buffer)
+
+    def _append_output(self, text: str) -> None:
+        size = len(text.encode("utf-8", errors="replace"))
+        self._output_buffer.append(text)
+        self._output_buffer_bytes += size
+        while self._output_buffer_bytes > MAX_OUTPUT_BUFFER_BYTES and self._output_buffer:
+            removed = self._output_buffer.pop(0)
+            self._output_buffer_bytes -= len(removed.encode("utf-8", errors="replace"))
 
     async def _mark_input_required(self, reason: str, source: str) -> None:
         reason = reason.strip() or "Human input required"

@@ -171,8 +171,11 @@ switch update
 14. If the agent needs approval/auth/confirmation, daemon emits session.input_required and the sidebar marks the session
 15. When the user types into that session, daemon emits session.input_resolved and the marker clears
 
-16. User clicks stop on the session
-17. Browser sends:  { type: "session.stop", daemonId, sessionId }
-18. Daemon sends SIGTERM to Claude process
-19. Session exits, status updates to "stopped"
+16. If the browser refreshes, it sends session.list to each daemon and restores live sessions in the sidebar
+17. When the user selects a restored session, browser sends session.subscribe and daemon returns recent ptyOutput for replay
+
+18. User clicks stop on the session
+19. Browser sends:  { type: "session.stop", daemonId, sessionId }
+20. Daemon sends SIGTERM to Claude process
+21. Session exits, status updates to "stopped"
 ```

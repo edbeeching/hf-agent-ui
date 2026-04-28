@@ -212,6 +212,44 @@ async def test_input_required_event_and_clear_via_ws(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_subscribe_replays_buffered_pty_output(tmp_path: Path) -> None:
+    """A refreshed browser can subscribe and receive recent PTY output."""
+    manager = SessionManager()
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "mock"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            await ws.send(json.dumps({
+                "type": "pty.input",
+                "sessionId": session_id,
+                "data": "buffer me\r",
+            }))
+            await _recv_until(
+                ws,
+                lambda m: m.get("type") == "pty.output" and "buffer me" in m.get("data", ""),
+            )
+
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "session.subscribe",
+                "sessionId": session_id,
+            })
+            subscribed = next(m for m in msgs if m["type"] == "session.subscribed")
+            output = "".join(subscribed["ptyOutput"])
+            assert subscribed["session"]["id"] == session_id
+            assert "buffer me" in output
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
 async def test_error_on_unknown_pty_session() -> None:
     """Sending input to a nonexistent PTY session should return an error."""
     manager = SessionManager()

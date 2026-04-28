@@ -36,6 +36,7 @@ interface ServerMessage {
   session?: SessionInfo
   sessions?: SessionInfo[]
   data?: unknown
+  ptyOutput?: string[]
   reason?: string
   source?: string
 }
@@ -97,7 +98,9 @@ export function useSwitch() {
         if (!daemonId || !msg.sessions) return
         setState(s => {
           const sessions = new Map(s.sessions)
-          sessions.set(daemonId, (msg.sessions || []).filter(session => session.mode === 'pty'))
+          sessions.set(daemonId, (msg.sessions || [])
+            .filter(session => session.mode === 'pty')
+            .map(normalizeSession))
           return { ...s, sessions }
         })
         break
@@ -105,18 +108,31 @@ export function useSwitch() {
 
       case 'pty.created': {
         if (!daemonId || !msg.session) return
-        const session = {
-          ...msg.session,
-          mode: 'pty',
-          needs_input: Boolean(msg.session.needs_input),
-          needs_input_reason: msg.session.needs_input_reason || null,
-        } as SessionInfo
+        const session = normalizeSession(msg.session)
         setState(s => {
           const sessions = new Map(s.sessions)
           const list = sessions.get(daemonId) || []
           if (list.some(s => s.id === session.id)) return s
           sessions.set(daemonId, [...list, session])
           return { ...s, sessions }
+        })
+        break
+      }
+
+      case 'session.subscribed': {
+        if (!daemonId || !msg.session) return
+        const session = normalizeSession(msg.session)
+        setState(s => {
+          const sessions = new Map(s.sessions)
+          const list = sessions.get(daemonId) || []
+          sessions.set(daemonId, upsertSession(list, session))
+
+          const ptyOutput = new Map(s.ptyOutput)
+          if (Array.isArray(msg.ptyOutput)) {
+            ptyOutput.set(session.id, msg.ptyOutput)
+          }
+
+          return { ...s, sessions, ptyOutput }
         })
         break
       }
@@ -232,6 +248,10 @@ export function useSwitch() {
     send({ type: 'session.list', daemonId })
   }, [send])
 
+  const subscribeSession = useCallback((daemonId: string, sessionId: string) => {
+    send({ type: 'session.subscribe', daemonId, sessionId })
+  }, [send])
+
   return {
     ...state,
     createPtySession,
@@ -239,6 +259,23 @@ export function useSwitch() {
     resizePty,
     stopSession,
     listSessions,
+    subscribeSession,
     fetchDaemons,
   }
+}
+
+function normalizeSession(session: SessionInfo): SessionInfo {
+  return {
+    ...session,
+    mode: 'pty',
+    needs_input: Boolean(session.needs_input),
+    needs_input_reason: session.needs_input_reason || null,
+  }
+}
+
+function upsertSession(list: SessionInfo[], session: SessionInfo): SessionInfo[] {
+  if (list.some(s => s.id === session.id)) {
+    return list.map(s => s.id === session.id ? session : s)
+  }
+  return [...list, session]
 }
