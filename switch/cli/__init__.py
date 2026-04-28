@@ -49,6 +49,15 @@ def main() -> None:
 REPO_URL = "git+ssh://git@github.com/edbeeching/switch.git"
 
 
+def _kill_port(port: int) -> None:
+    """Kill any process listening on the given port."""
+    import subprocess
+    try:
+        subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True, timeout=3)
+    except Exception:
+        pass
+
+
 def _run_update() -> None:
     import shutil
     import subprocess
@@ -82,6 +91,12 @@ def _run_dev() -> None:
     if not (web_dir / "node_modules").exists():
         print("[switch dev] Installing frontend dependencies...")
         subprocess.run(["npm", "install"], cwd=web_dir, check=True)
+
+    # Kill stale processes on our ports
+    for port in [9341, 9340, 5173]:
+        _kill_port(port)
+    import time
+    time.sleep(0.5)
 
     procs: list[subprocess.Popen] = []
     try:
@@ -141,6 +156,8 @@ def _run_hub(args: argparse.Namespace) -> None:
     import logging
     import os
 
+    _kill_port(args.port)
+
     import uvicorn
 
     logging.basicConfig(
@@ -185,6 +202,8 @@ def _run_daemon(args: argparse.Namespace) -> None:
     import asyncio
     import logging
     import signal
+
+    _kill_port(args.port)
 
     from switch.daemon.registration import HubRegistration
     from switch.daemon.session_manager import SessionManager
