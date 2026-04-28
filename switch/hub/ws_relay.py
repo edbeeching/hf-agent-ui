@@ -32,7 +32,7 @@ class WsRelay:
       <- { type: "pty.exit", daemonId, sessionId, code }
       <- { type: "session.input_required", daemonId, sessionId, reason, source }
       <- { type: "session.input_resolved", daemonId, sessionId }
-      <- { type: "session.subscribed", daemonId, session, ptyOutput? }
+      <- { type: "session.subscribed", daemonId, session }
       <- { type: "session.list", daemonId, sessions }
       <- { type: "error", message }
     """
