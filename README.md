@@ -15,8 +15,16 @@ Browser <--WS--> Hub (FastAPI) <--WS--> Daemon (Python) <--stdio--> Claude / Cod
 ## Install
 
 ```bash
-uv tool install .          # installs `switch` globally — works from any directory
+# Install from GitHub (no clone needed)
+uv tool install git+https://github.com/edbeeching/switch.git
+
+# Or from a local checkout
+git clone https://github.com/edbeeching/switch.git
+cd switch
+uv tool install .
 ```
+
+This puts `switch` on your PATH globally, isolated from other projects.
 
 ## Quick Start
 
@@ -27,7 +35,8 @@ switch hub
 # Terminal 2 — start a daemon (on each machine)
 switch daemon
 
-# Terminal 3 — start the web UI (from this repo)
+# Terminal 3 — start the web UI (requires repo checkout)
+cd switch
 switch web
 # Open http://localhost:5173
 ```
@@ -41,10 +50,12 @@ switch daemon --hub http://<hub-host>:9341 --name my-server
 ## CLI Reference
 
 ```
-switch hub     [-p PORT] [--host HOST] [-v]     Start the hub (default :9341)
+switch hub     [-p PORT] [--host HOST] [-v]          Start the hub (default :9341)
 switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]  Start a daemon (default :9340)
-switch web     [-p PORT]                        Start the web UI (default :5173)
+switch web     [-p PORT]                              Start the web UI (default :5173)
 ```
+
+> **Note:** `switch hub` and `switch daemon` work from anywhere. `switch web` runs the Vite dev server and needs the repo checkout.
 
 ## Supported Tools
 
