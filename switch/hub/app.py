@@ -51,7 +51,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     await relay.handle_browser(ws)
 
 
-# Serve static web UI if it exists
-STATIC_DIR = Path(__file__).parent.parent.parent / "web" / "dist"
+# Serve bundled web UI
+STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

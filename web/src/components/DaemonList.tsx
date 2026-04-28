@@ -1,4 +1,4 @@
-import { Daemon, SessionInfo } from '../hooks/useSwitch'
+import type { Daemon, SessionInfo } from '../hooks/useSwitch'
 
 interface Props {
   daemons: Daemon[]

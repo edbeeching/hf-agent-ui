@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { SessionMessage } from '../hooks/useSwitch'
+import type { SessionMessage } from '../hooks/useSwitch'
 
 interface Props {
   messages: SessionMessage[]

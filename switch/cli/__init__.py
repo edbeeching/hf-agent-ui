@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
-from pathlib import Path
 
 
 def main() -> None:
@@ -14,7 +12,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     # --- hub ---
-    hub_p = sub.add_parser("hub", help="Start the central hub server")
+    hub_p = sub.add_parser("hub", help="Start the hub server (includes web UI)")
     hub_p.add_argument("-p", "--port", type=int, default=9341, help="Port (default: 9341)")
     hub_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
     hub_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
@@ -26,18 +24,12 @@ def main() -> None:
     daemon_p.add_argument("-n", "--name", default=None, help="Display name (default: daemon-<port>)")
     daemon_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
 
-    # --- web ---
-    web_p = sub.add_parser("web", help="Start the web UI dev server")
-    web_p.add_argument("-p", "--port", type=int, default=5173, help="Port (default: 5173)")
-
     args = parser.parse_args()
 
     if args.command == "hub":
         _run_hub(args)
     elif args.command == "daemon":
         _run_daemon(args)
-    elif args.command == "web":
-        _run_web(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -107,20 +99,3 @@ def _run_daemon(args: argparse.Namespace) -> None:
         await registration.stop()
 
     asyncio.run(run())
-
-
-def _run_web(args: argparse.Namespace) -> None:
-    web_dir = Path(__file__).parent.parent.parent / "web"
-    if not (web_dir / "package.json").exists():
-        print(f"Error: web directory not found at {web_dir}", file=sys.stderr)
-        sys.exit(1)
-
-    if not (web_dir / "node_modules").exists():
-        print("Installing web dependencies...")
-        subprocess.run(["npm", "install"], cwd=web_dir, check=True)
-
-    subprocess.run(
-        ["npx", "vite", "--port", str(args.port)],
-        cwd=web_dir,
-        check=True,
-    )

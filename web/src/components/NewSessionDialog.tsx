@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Daemon } from '../hooks/useSwitch'
+import type { Daemon } from '../hooks/useSwitch'
 
 interface Props {
   daemon: Daemon

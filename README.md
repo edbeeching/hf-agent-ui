@@ -8,54 +8,33 @@ Web-based mission control for AI coding sessions. Manage Claude Code and Codex C
 Browser <--WS--> Hub (FastAPI) <--WS--> Daemon (Python) <--stdio--> Claude / Codex CLI
 ```
 
-- **Daemon** — runs on each remote machine, wraps AI CLI tools, exposes WebSocket API
 - **Hub** — central server, daemon registry, WebSocket relay, serves the web UI
-- **Web** — React dashboard with real-time session streaming
+- **Daemon** — runs on each remote machine, wraps AI CLI tools, exposes WebSocket API
 
 ## Install
 
 ```bash
-# Install from GitHub (no clone needed)
 uv tool install git+https://github.com/edbeeching/switch.git
-
-# Or from a local checkout
-git clone https://github.com/edbeeching/switch.git
-cd switch
-uv tool install .
 ```
-
-This puts `switch` on your PATH globally, isolated from other projects.
 
 ## Quick Start
 
 ```bash
-# Terminal 1 — start the hub
+# Start the hub (serves the web UI on :9341)
 switch hub
 
-# Terminal 2 — start a daemon (on each machine)
-switch daemon
+# Start a daemon (on each machine)
+switch daemon --hub http://<hub-host>:9341
 
-# Terminal 3 — start the web UI (requires repo checkout)
-cd switch
-switch web
-# Open http://localhost:5173
-```
-
-For remote machines, point the daemon at your hub:
-
-```bash
-switch daemon --hub http://<hub-host>:9341 --name my-server
+# Open http://localhost:9341
 ```
 
 ## CLI Reference
 
 ```
-switch hub     [-p PORT] [--host HOST] [-v]          Start the hub (default :9341)
+switch hub     [-p PORT] [--host HOST] [-v]          Start the hub + web UI (default :9341)
 switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]  Start a daemon (default :9340)
-switch web     [-p PORT]                              Start the web UI (default :5173)
 ```
-
-> **Note:** `switch hub` and `switch daemon` work from anywhere. `switch web` runs the Vite dev server and needs the repo checkout.
 
 ## Supported Tools
 
