@@ -155,22 +155,24 @@ switch update
 
 ```
 1. User clicks "+" on a daemon in the sidebar
-2. Browser sends:  { type: "session.create", daemonId, workDir, tool: "claude" }
+2. Browser sends:  { type: "pty.create", daemonId, workDir, tool: "claude" }
 3. Hub relays to daemon via WebSocket
-4. Daemon spawns: claude --print --output-format stream-json --input-format stream-json --verbose
+4. Daemon spawns: claude in a pseudo-terminal
 5. Daemon subscribes hub to session events
-6. Hub sends back: { type: "session.created", session: { id, status, tool, ... } }
+6. Hub sends back: { type: "pty.created", session: { id, status, tool, mode: "pty", ... } }
 7. Session appears in sidebar
 
-8. User types "fix the bug in main.py" and hits Enter
-9. Browser sends:  { type: "session.send", daemonId, sessionId, message }
+8. User types into the xterm terminal
+9. Browser sends:  { type: "pty.input", daemonId, sessionId, data }
 10. Hub relays to daemon
-11. Daemon writes to Claude's stdin: {"type":"user","message":{"role":"user","content":"fix the bug..."}}
-12. Claude streams NDJSON on stdout → daemon emits events → hub relays to browser
-13. Browser renders: assistant text, tool use blocks, tool results, final answer
+11. Daemon writes keystrokes to the PTY
+12. Claude/Codex streams terminal output → daemon emits pty.output → hub relays to browser
+13. Browser renders the full TUI in xterm
+14. If the agent needs approval/auth/confirmation, daemon emits session.input_required and the sidebar marks the session
+15. When the user types into that session, daemon emits session.input_resolved and the marker clears
 
-14. User clicks stop on the session
-15. Browser sends:  { type: "session.stop", daemonId, sessionId }
-16. Daemon sends SIGTERM to Claude process
-17. Session exits, status updates to "stopped"
+16. User clicks stop on the session
+17. Browser sends:  { type: "session.stop", daemonId, sessionId }
+18. Daemon sends SIGTERM to Claude process
+19. Session exits, status updates to "stopped"
 ```

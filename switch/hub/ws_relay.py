@@ -20,17 +20,18 @@ class WsRelay:
     Receives messages from daemons (via pool callback), routes to subscribed browsers.
 
     Browser protocol:
-      -> { type: "session.create", daemonId, workDir, model?, permissionMode? }
-      -> { type: "session.send", daemonId, sessionId, message }
-      -> { type: "session.control", daemonId, sessionId, response }
+      -> { type: "pty.create", daemonId, workDir, tool?, cols?, rows? }
+      -> { type: "pty.input", daemonId, sessionId, data }
+      -> { type: "pty.resize", daemonId, sessionId, cols, rows }
       -> { type: "session.stop", daemonId, sessionId }
       -> { type: "session.list", daemonId }
       -> { type: "session.subscribe", daemonId, sessionId }
 
-      <- { type: "session.created", daemonId, session }
-      <- { type: "session.message", daemonId, sessionId, data }
-      <- { type: "session.stderr", daemonId, sessionId, text }
-      <- { type: "session.exit", daemonId, sessionId, code }
+      <- { type: "pty.created", daemonId, session }
+      <- { type: "pty.output", daemonId, sessionId, data }
+      <- { type: "pty.exit", daemonId, sessionId, code }
+      <- { type: "session.input_required", daemonId, sessionId, reason, source }
+      <- { type: "session.input_resolved", daemonId, sessionId }
       <- { type: "session.list", daemonId, sessions }
       <- { type: "error", message }
     """

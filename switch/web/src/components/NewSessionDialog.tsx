@@ -4,38 +4,20 @@ import type { Daemon } from '../hooks/useSwitch'
 interface Props {
   daemon: Daemon
   onClose: () => void
-  onCreateJson: (
-    daemonId: string,
-    workDir: string,
-    opts?: { tool?: string; model?: string; permissionMode?: string; initialPrompt?: string },
-  ) => void
-  onCreatePty: (
+  onCreate: (
     daemonId: string,
     workDir: string,
     tool: string,
   ) => void
 }
 
-export function NewSessionDialog({ daemon, onClose, onCreateJson, onCreatePty }: Props) {
-  const [mode, setMode] = useState<'pty' | 'json'>('pty')
+export function NewSessionDialog({ daemon, onClose, onCreate }: Props) {
   const [tool, setTool] = useState('claude')
   const [workDir, setWorkDir] = useState('~')
-  const [model, setModel] = useState('')
-  const [permissionMode, setPermissionMode] = useState('')
-  const [initialPrompt, setInitialPrompt] = useState('')
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (mode === 'pty') {
-      onCreatePty(daemon.id, workDir, tool)
-    } else {
-      onCreateJson(daemon.id, workDir, {
-        tool,
-        model: model || undefined,
-        permissionMode: permissionMode || undefined,
-        initialPrompt: initialPrompt || undefined,
-      })
-    }
+    onCreate(daemon.id, workDir, tool)
     onClose()
   }
 
@@ -44,13 +26,6 @@ export function NewSessionDialog({ daemon, onClose, onCreateJson, onCreatePty }:
       <div className="dialog" onClick={e => e.stopPropagation()}>
         <h3>New Session on {daemon.name}</h3>
         <form onSubmit={handleSubmit}>
-          <label>
-            Mode
-            <select value={mode} onChange={e => setMode(e.target.value as 'pty' | 'json')}>
-              <option value="pty">Terminal (full TUI)</option>
-              <option value="json">Headless (JSON stream)</option>
-            </select>
-          </label>
           <label>
             Tool
             <select value={tool} onChange={e => setTool(e.target.value)}>
@@ -68,49 +43,6 @@ export function NewSessionDialog({ daemon, onClose, onCreateJson, onCreatePty }:
               required
             />
           </label>
-          {mode === 'json' && (
-            <>
-              {tool === 'codex' && (
-                <label>
-                  Initial prompt (required for Codex)
-                  <textarea
-                    value={initialPrompt}
-                    onChange={e => setInitialPrompt(e.target.value)}
-                    placeholder="e.g. fix the bug in main.py"
-                    rows={3}
-                    required
-                  />
-                </label>
-              )}
-              <label>
-                Model (optional)
-                <input
-                  type="text"
-                  value={model}
-                  onChange={e => setModel(e.target.value)}
-                  placeholder={tool === 'claude' ? 'e.g. sonnet, opus' : 'e.g. o3, o4-mini'}
-                />
-              </label>
-              <label>
-                Permission mode (optional)
-                <select value={permissionMode} onChange={e => setPermissionMode(e.target.value)}>
-                  <option value="">Default</option>
-                  {tool === 'claude' ? (
-                    <>
-                      <option value="auto">Auto</option>
-                      <option value="acceptEdits">Accept edits</option>
-                      <option value="bypassPermissions">Bypass permissions</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="auto">Full auto (auto-approve)</option>
-                      <option value="acceptEdits">On request</option>
-                    </>
-                  )}
-                </select>
-              </label>
-            </>
-          )}
           <div className="dialog-actions">
             <button type="button" onClick={onClose}>Cancel</button>
             <button type="submit">Create</button>
