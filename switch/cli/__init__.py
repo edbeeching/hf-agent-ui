@@ -51,9 +51,24 @@ REPO_URL = "git+ssh://git@github.com/edbeeching/switch.git"
 
 def _kill_port(port: int) -> None:
     """Kill any process listening on the given port."""
+    import os
+    import signal
     import subprocess
     try:
-        subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True, timeout=3)
+        # Get PIDs on the port
+        result = subprocess.run(
+            ["fuser", f"{port}/tcp"],
+            capture_output=True, text=True, timeout=3,
+        )
+        pids = result.stdout.strip().split()
+        for pid in pids:
+            pid = pid.strip()
+            if pid.isdigit():
+                # Kill the entire process group to get child workers too
+                try:
+                    os.kill(int(pid), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
     except Exception:
         pass
 
@@ -147,9 +162,15 @@ def _run_dev() -> None:
     except KeyboardInterrupt:
         print("\n[switch dev] Stopping...")
         for p in procs:
-            p.send_signal(signal.SIGTERM)
+            try:
+                os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
         for p in procs:
-            p.wait(timeout=5)
+            try:
+                p.wait(timeout=5)
+            except Exception:
+                p.kill()
 
 
 def _run_hub(args: argparse.Namespace) -> None:

@@ -87,8 +87,10 @@ class DaemonConnectionPool:
         self._on_message = on_message
 
     async def connect(self, daemon: DaemonInfo) -> None:
-        if daemon.id in self._connections:
-            return
+        # Disconnect old connection if it exists (e.g. daemon re-registered)
+        old = self._connections.get(daemon.id)
+        if old:
+            await old.disconnect()
         conn = DaemonConnection(daemon, self._on_message)
         self._connections[daemon.id] = conn
         await conn.connect()
