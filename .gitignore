@@ -1,6 +1,10 @@
 # Node
 node_modules/
 
+# Local Git worktrees. Keep agent/work branches under this repo so sandboxed
+# tools can write them without needing sibling-directory permissions.
+.worktrees/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

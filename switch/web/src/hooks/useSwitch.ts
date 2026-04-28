@@ -38,6 +38,7 @@ interface ServerMessage {
   data?: unknown
   reason?: string
   source?: string
+  status?: string
 }
 
 export function useSwitch() {
@@ -162,7 +163,20 @@ export function useSwitch() {
       case 'pty.exit': {
         if (!sessionId) return
         updateSessionInputRequired(sessionId, false)
-        updateSessionStatus(sessionId, 'stopped')
+        updateSessionStatus(sessionId, msg.status || 'stopped')
+        break
+      }
+
+      case 'session.paused':
+      case 'session.resumed': {
+        if (!daemonId || !sessionId || !msg.session) return
+        const session = normalizeSession(msg.session)
+        setState(s => {
+          const sessions = new Map(s.sessions)
+          const list = sessions.get(daemonId) || []
+          sessions.set(daemonId, upsertSession(list, session))
+          return { ...s, sessions }
+        })
         break
       }
 
@@ -241,6 +255,15 @@ export function useSwitch() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!state.connected) return
+    for (const daemon of state.daemons) {
+      if (daemon.connected) {
+        send({ type: 'session.list', daemonId: daemon.id })
+      }
+    }
+  }, [send, state.connected, state.daemons])
+
   const createPtySession = useCallback((
     daemonId: string,
     workDir: string,
@@ -279,6 +302,22 @@ export function useSwitch() {
     })
   }, [send])
 
+  const pauseSession = useCallback((daemonId: string, sessionId: string) => {
+    send({ type: 'session.pause', daemonId, sessionId })
+  }, [send])
+
+  const resumeSession = useCallback((daemonId: string, sessionId: string) => {
+    send({ type: 'session.resume', daemonId, sessionId })
+  }, [send])
+
+  const pauseDaemon = useCallback((daemonId: string) => {
+    send({ type: 'app.pause', daemonId })
+  }, [send])
+
+  const resumeDaemon = useCallback((daemonId: string) => {
+    send({ type: 'app.resume', daemonId })
+  }, [send])
+
   const listSessions = useCallback((daemonId: string) => {
     send({ type: 'session.list', daemonId })
   }, [send])
@@ -294,6 +333,10 @@ export function useSwitch() {
     resizePty,
     stopSession,
     removeSession,
+    pauseSession,
+    resumeSession,
+    pauseDaemon,
+    resumeDaemon,
     listSessions,
     subscribeSession,
     fetchDaemons,

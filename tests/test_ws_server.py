@@ -58,7 +58,7 @@ async def _recv_until(ws, predicate, timeout=3.0) -> list[dict]:
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_create_pty_session_via_ws(tmp_path: Path) -> None:
     """Create a PTY session via WS and verify we get pty.created back."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)  # port 0 = random available port
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
@@ -92,7 +92,7 @@ async def test_create_pty_session_via_ws(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_send_pty_input_and_stream_output_via_ws(tmp_path: Path) -> None:
     """Send input via WS and verify terminal output comes back."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
@@ -128,7 +128,7 @@ async def test_send_pty_input_and_stream_output_via_ws(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_session_list_via_ws(tmp_path: Path) -> None:
     """session.list should return all PTY sessions."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
@@ -152,7 +152,7 @@ async def test_session_list_via_ws(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_stop_session_via_ws(tmp_path: Path) -> None:
     """session.stop should stop the PTY session and emit pty.exit."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
@@ -206,7 +206,7 @@ async def test_remove_session_via_ws(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_input_required_event_and_clear_via_ws(tmp_path: Path) -> None:
     """Prompt-like output should mark input required until the user types."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
@@ -244,7 +244,7 @@ async def test_input_required_event_and_clear_via_ws(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_subscribe_replays_buffered_pty_output(tmp_path: Path) -> None:
     """A refreshed browser can subscribe and receive recent PTY output."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
@@ -279,9 +279,43 @@ async def test_subscribe_replays_buffered_pty_output(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_error_on_unknown_pty_session() -> None:
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_pause_and_resume_session_via_ws(tmp_path: Path) -> None:
+    """Paused PTY sessions should keep their Switch id and resume into a running process."""
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "mock"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            await ws.send(json.dumps({"type": "session.pause", "sessionId": session_id}))
+            msgs = await _recv_until(ws, lambda m: m.get("type") == "session.paused")
+            paused = next(m for m in msgs if m["type"] == "session.paused")
+            assert paused["sessionId"] == session_id
+            assert paused["session"]["status"] == "paused"
+
+            await asyncio.sleep(0.3)
+            assert manager.get(session_id).to_info().status == "paused"
+
+            await ws.send(json.dumps({"type": "session.resume", "sessionId": session_id}))
+            msgs = await _recv_until(ws, lambda m: m.get("type") == "session.resumed")
+            resumed = next(m for m in msgs if m["type"] == "session.resumed")
+            assert resumed["sessionId"] == session_id
+            assert resumed["session"]["status"] == "running"
+            assert manager.get(session_id).to_info().status == "running"
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_error_on_unknown_pty_session(tmp_path: Path) -> None:
     """Sending input to a nonexistent PTY session should return an error."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]

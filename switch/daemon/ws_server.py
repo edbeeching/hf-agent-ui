@@ -25,6 +25,10 @@ class DaemonWsServer:
       { type: "pty.input", sessionId, data }
       { type: "pty.resize", sessionId, cols, rows }
       { type: "session.stop", sessionId }
+      { type: "session.pause", sessionId }
+      { type: "session.resume", sessionId }
+      { type: "app.pause" }
+      { type: "app.resume" }
       { type: "session.remove", sessionId }
       { type: "session.list" }
       { type: "session.subscribe", sessionId }
@@ -140,6 +144,54 @@ class DaemonWsServer:
                         "message": f"Session not found: {req.get('sessionId')}",
                         "requestType": msg_type,
                     })
+
+            case "session.pause":
+                session_id = req.get("sessionId", "")
+                if not self.manager.pause(session_id):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"Session not found: {session_id}",
+                        "requestType": msg_type,
+                    })
+                    return
+                session = self.manager.get(session_id)
+                await self._send(ws, {
+                    "type": "session.paused",
+                    "sessionId": session_id,
+                    "session": json.loads(json.dumps(session.to_info().__dict__, default=str)) if session else None,
+                })
+
+            case "session.resume":
+                session_id = req.get("sessionId", "")
+                if not await self.manager.resume(session_id):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"Session not found: {session_id}",
+                        "requestType": msg_type,
+                    })
+                    return
+                session = self.manager.get(session_id)
+                if session:
+                    self._subscribe_any(ws, session)
+                await self._send(ws, {
+                    "type": "session.resumed",
+                    "sessionId": session_id,
+                    "session": json.loads(json.dumps(session.to_info().__dict__, default=str)) if session else None,
+                })
+
+            case "app.pause":
+                self.manager.pause_all()
+                await self._send(ws, {
+                    "type": "session.list",
+                    "sessions": self.manager.list(),
+                })
+
+            case "app.resume":
+                await self.manager.resume_all()
+                await self._send(ws, {
+                    "type": "session.list",
+                    "sessions": self.manager.list(),
+                })
 
             case "session.remove":
                 session_id = req.get("sessionId", "")

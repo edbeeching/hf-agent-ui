@@ -8,6 +8,10 @@ interface Props {
   onSelectSession: (daemonId: string, sessionId: string) => void
   onNewSession: (daemonId: string) => void
   onCloseSession: (daemonId: string, sessionId: string) => void
+  onPauseSession: (daemonId: string, sessionId: string) => void
+  onResumeSession: (daemonId: string, sessionId: string) => void
+  onPauseDaemon: (daemonId: string) => void
+  onResumeDaemon: (daemonId: string) => void
 }
 
 interface ContextMenuState {
@@ -24,6 +28,10 @@ export function DaemonList({
   onSelectSession,
   onNewSession,
   onCloseSession,
+  onPauseSession,
+  onResumeSession,
+  onPauseDaemon,
+  onResumeDaemon,
 }: Props) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
@@ -56,6 +64,20 @@ export function DaemonList({
               <span className="daemon-hostname">{daemon.hostname}</span>
               <button
                 className="btn-icon"
+                onClick={() => onPauseDaemon(daemon.id)}
+                title="Pause all sessions"
+              >
+                ||
+              </button>
+              <button
+                className="btn-icon"
+                onClick={() => onResumeDaemon(daemon.id)}
+                title="Resume all sessions"
+              >
+                &gt;
+              </button>
+              <button
+                className="btn-icon"
                 onClick={() => onNewSession(daemon.id)}
                 title="New session"
               >
@@ -82,8 +104,30 @@ export function DaemonList({
                 <span className={`status-dot ${session.status}`} />
                 {session.needs_input && <span className="input-required-badge">!</span>}
                 <span className={`tool-badge ${session.tool || 'claude'}`}>{session.tool || 'claude'}</span>
-                {session.mode === 'pty' && <span className="mode-badge">tty</span>}
                 <span className="session-dir">{session.work_dir}</span>
+                {session.status === 'paused' ? (
+                  <button
+                    className="btn-icon session-action"
+                    onClick={e => {
+                      e.stopPropagation()
+                      onResumeSession(daemon.id, session.id)
+                    }}
+                    title="Resume session"
+                  >
+                    &gt;
+                  </button>
+                ) : (
+                  <button
+                    className="btn-icon session-action"
+                    onClick={e => {
+                      e.stopPropagation()
+                      onPauseSession(daemon.id, session.id)
+                    }}
+                    title="Pause session"
+                  >
+                    ||
+                  </button>
+                )}
               </div>
             ))}
           </div>

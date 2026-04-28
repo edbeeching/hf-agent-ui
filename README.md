@@ -58,6 +58,17 @@ cd switch/web && npm install && npm run build
 cp -r dist/* ../hub/static/
 ```
 
+### Worktrees
+
+Keep local worktrees inside the repo under `.worktrees/` so sandboxed coding agents can read and write them without needing permissions for sibling directories:
+
+```bash
+mkdir -p .worktrees
+git worktree add .worktrees/<name> -b <branch> origin/main
+```
+
+The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to the repo, such as `../switch-main`, because those paths may sit outside an agent's writable workspace root.
+
 ## Supported Tools
 
 | Tool | Status | Notes |
