@@ -113,8 +113,12 @@ def _run_dev() -> None:
         ))
 
         print("[switch dev] Starting hub (:9341), daemon, and frontend (:5173)")
-        print("[switch dev] Open http://localhost:5173")
         print("[switch dev] Press Ctrl+C to stop all")
+
+        import webbrowser
+        import time as _time
+        _time.sleep(2)
+        webbrowser.open("http://localhost:5173")
 
         # Wait for any process to exit
         while True:
@@ -161,6 +165,11 @@ def _run_hub(args: argparse.Namespace) -> None:
     else:
         print(f"  [switch hub] Open {hub_url}")
     print()
+
+    import threading
+    import webbrowser
+    open_url = "http://localhost:5173" if args.dev else hub_url
+    threading.Timer(1.5, webbrowser.open, args=[open_url]).start()
 
     uvicorn.run(
         "switch.hub.app:app",
