@@ -56,10 +56,22 @@ function MessageBlock({ message }: { message: SessionMessage }) {
   return null
 }
 
-function StreamEventBlock({ data }: { data: any }) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isTextPart(value: unknown): value is { type: 'text'; text: string } {
+  return isRecord(value) && value.type === 'text' && typeof value.text === 'string'
+}
+
+function StreamEventBlock({ data }: { data: unknown }) {
+  if (!isRecord(data)) {
+    return <div className="msg msg-raw"><pre>{String(data)}</pre></div>
+  }
+
   // === Shared types ===
   if (data.type === 'raw') {
-    return <div className="msg msg-raw"><pre>{data.text}</pre></div>
+    return <div className="msg msg-raw"><pre>{String(data.text || '')}</pre></div>
   }
 
   // System/info messages (both tools)
@@ -67,11 +79,11 @@ function StreamEventBlock({ data }: { data: any }) {
     if (data.subtype === 'init') {
       return (
         <div className="msg msg-system">
-          Session initialized — model: {data.model || 'unknown'}
+          Session initialized — model: {String(data.model || 'unknown')}
         </div>
       )
     }
-    if (data.text) {
+    if (typeof data.text === 'string') {
       return <div className="msg msg-system">{data.text}</div>
     }
     return null
@@ -88,23 +100,26 @@ function StreamEventBlock({ data }: { data: any }) {
     )
   }
 
-  if (data.type === 'content_block_delta' && data.delta?.text) {
+  if (data.type === 'content_block_delta' && isRecord(data.delta) && typeof data.delta.text === 'string') {
     return <span className="msg-text-delta">{data.delta.text}</span>
   }
 
   if (data.type === 'assistant') {
-    const content = data.message?.content
+    const content = isRecord(data.message) ? data.message.content : undefined
     if (Array.isArray(content)) {
       return (
         <div className="msg msg-assistant">
-          {content.map((block: any, i: number) => {
+          {content.map((block, i: number) => {
+            if (!isRecord(block)) {
+              return <pre key={i}>{JSON.stringify(block, null, 2)}</pre>
+            }
             if (block.type === 'text') {
-              return <pre key={i} className="msg-text">{block.text}</pre>
+              return <pre key={i} className="msg-text">{String(block.text || '')}</pre>
             }
             if (block.type === 'tool_use') {
               return (
                 <div key={i} className="msg-tool-use">
-                  <div className="msg-label">Tool: {block.name}</div>
+                  <div className="msg-label">Tool: {String(block.name || 'unknown')}</div>
                   <pre>{JSON.stringify(block.input, null, 2)}</pre>
                 </div>
               )
@@ -126,7 +141,7 @@ function StreamEventBlock({ data }: { data: any }) {
   if (data.type === 'thread.started') {
     return (
       <div className="msg msg-system">
-        Codex session started (id: {data.session_id || 'unknown'})
+        Codex session started (id: {String(data.session_id || 'unknown')})
       </div>
     )
   }
@@ -146,18 +161,18 @@ function StreamEventBlock({ data }: { data: any }) {
   if (data.type === 'turn.failed') {
     return (
       <div className="msg msg-stderr">
-        <pre>Turn failed: {data.error || JSON.stringify(data)}</pre>
+        <pre>Turn failed: {typeof data.error === 'string' ? data.error : JSON.stringify(data)}</pre>
       </div>
     )
   }
 
   // Codex item events (text output, file changes, etc.)
-  if (data.type?.startsWith('item.')) {
-    const item = data.item || data
+  if (typeof data.type === 'string' && data.type.startsWith('item.')) {
+    const item = isRecord(data.item) ? data.item : data
     // Text output
     if (item.type === 'message' && item.content) {
       const textParts = Array.isArray(item.content)
-        ? item.content.filter((c: any) => c.type === 'text').map((c: any) => c.text)
+        ? item.content.filter(isTextPart).map(c => c.text)
         : [String(item.content)]
       return (
         <div className="msg msg-assistant">
@@ -169,10 +184,11 @@ function StreamEventBlock({ data }: { data: any }) {
     }
     // Tool use / function call
     if (item.type === 'function_call' || item.type === 'tool_use') {
+      const functionInfo = isRecord(item.function) ? item.function : undefined
       return (
         <div className="msg-tool-use">
-          <div className="msg-label">Tool: {item.name || item.function?.name || 'unknown'}</div>
-          <pre>{JSON.stringify(item.arguments || item.input || item.function?.arguments, null, 2)}</pre>
+          <div className="msg-label">Tool: {String(item.name || functionInfo?.name || 'unknown')}</div>
+          <pre>{JSON.stringify(item.arguments || item.input || functionInfo?.arguments, null, 2)}</pre>
         </div>
       )
     }
@@ -190,7 +206,7 @@ function StreamEventBlock({ data }: { data: any }) {
   if (data.type === 'error') {
     return (
       <div className="msg msg-stderr">
-        <pre>{data.message || JSON.stringify(data)}</pre>
+        <pre>{typeof data.message === 'string' ? data.message : JSON.stringify(data)}</pre>
       </div>
     )
   }

@@ -17,6 +17,16 @@ export function TerminalView({ sessionId, onInput, onResize, output }: Props) {
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const writtenRef = useRef(0)
+  const onInputRef = useRef(onInput)
+  const onResizeRef = useRef(onResize)
+
+  useEffect(() => {
+    onInputRef.current = onInput
+  }, [onInput])
+
+  useEffect(() => {
+    onResizeRef.current = onResize
+  }, [onResize])
 
   // Initialize terminal
   useEffect(() => {
@@ -59,12 +69,12 @@ export function TerminalView({ sessionId, onInput, onResize, output }: Props) {
 
     // Send keystrokes to the session
     term.onData((data) => {
-      onInput(data)
+      onInputRef.current(data)
     })
 
     // Handle resize
     term.onResize(({ cols, rows }) => {
-      onResize(cols, rows)
+      onResizeRef.current(cols, rows)
     })
 
     // Window resize

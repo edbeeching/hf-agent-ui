@@ -77,6 +77,12 @@ class DaemonConnection:
             await self._ws.close()
         if self._task:
             self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        self._ws = None
+        self._task = None
 
 
 class DaemonConnectionPool:

@@ -64,7 +64,6 @@ def _kill_port(port: int) -> None:
         for pid in pids:
             pid = pid.strip()
             if pid.isdigit():
-                # Kill the entire process group to get child workers too
                 try:
                     os.kill(int(pid), signal.SIGTERM)
                 except ProcessLookupError:
@@ -119,6 +118,7 @@ def _run_dev() -> None:
         procs.append(subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "switch.hub.app:app",
              "--host", "0.0.0.0", "--port", "9341", "--reload", "--reload-dir", "switch"],
+            start_new_session=True,
         ))
         # Wait for hub to be ready before starting daemon
         import time
@@ -135,11 +135,13 @@ def _run_dev() -> None:
              "from switch.cli import _run_daemon; import argparse; "
              "args = argparse.Namespace(port=9340, hub='http://localhost:9341', name='local', verbose=False); "
              "_run_daemon(args)"],
+            start_new_session=True,
         ))
         # Vite dev server
         procs.append(subprocess.Popen(
             ["npx", "vite", "--port", "5173"],
             cwd=web_dir,
+            start_new_session=True,
         ))
 
         print("[switch dev] Starting hub (:9341), daemon, and frontend (:5173)")
