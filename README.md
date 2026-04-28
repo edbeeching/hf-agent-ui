@@ -12,27 +12,30 @@ Browser <--WS--> Hub (FastAPI) <--WS--> Daemon (Python) <--stdio--> Claude / Cod
 - **Hub** — central server, daemon registry, WebSocket relay, serves the web UI
 - **Web** — React dashboard with real-time session streaming
 
+## Install
+
+```bash
+uv tool install .          # installs `switch` globally — works from any directory
+```
+
 ## Quick Start
 
 ```bash
-# Install
-uv sync
-
 # Terminal 1 — start the hub
-uv run switch hub
+switch hub
 
-# Terminal 2 — start a daemon
-uv run switch daemon
+# Terminal 2 — start a daemon (on each machine)
+switch daemon
 
-# Terminal 3 — start the web UI
-uv run switch web
+# Terminal 3 — start the web UI (from this repo)
+switch web
 # Open http://localhost:5173
 ```
 
 For remote machines, point the daemon at your hub:
 
 ```bash
-uv run switch daemon --hub http://<hub-host>:9341 --name my-server
+switch daemon --hub http://<hub-host>:9341 --name my-server
 ```
 
 ## CLI Reference
