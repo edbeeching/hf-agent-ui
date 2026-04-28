@@ -8,8 +8,9 @@ from typing import Any
 import websockets
 from websockets.asyncio.server import Server, ServerConnection
 
+from .pty_session import PtySession
 from .session import Session
-from .session_manager import SessionManager, SessionOptions
+from .session_manager import AnySession, SessionManager, SessionOptions
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,38 @@ class DaemonWsServer:
                     ),
                 })
 
+            case "pty.create":
+                tool = req.get("tool", "claude")
+                work_dir = req.get("workDir", ".")
+                cols = req.get("cols", 120)
+                rows = req.get("rows", 40)
+                session = self.manager.create_pty(work_dir, tool, cols, rows)
+                self._subscribe_any(ws, session)
+                await session.start()
+                await self._send(ws, {
+                    "type": "pty.created",
+                    "session": json.loads(
+                        json.dumps(session.to_info().__dict__, default=str)
+                    ),
+                })
+
+            case "pty.input":
+                session = self.manager.get(req.get("sessionId", ""))
+                if not session or not isinstance(session, PtySession):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"PTY session not found: {req.get('sessionId')}",
+                        "requestType": msg_type,
+                    })
+                    return
+                session.write(req.get("data", ""))
+
+            case "pty.resize":
+                session = self.manager.get(req.get("sessionId", ""))
+                if not session or not isinstance(session, PtySession):
+                    return
+                session.resize(req.get("cols", 120), req.get("rows", 40))
+
             case "session.send":
                 session = self.manager.get(req.get("sessionId", ""))
                 if not session:
@@ -176,6 +209,9 @@ class DaemonWsServer:
                 })
 
     def _subscribe(self, ws: ServerConnection, session: Session) -> None:
+        self._subscribe_any(ws, session)
+
+    def _subscribe_any(self, ws: ServerConnection, session: AnySession) -> None:
         subs = self._subscriptions.get(ws)
         if subs is None or session.id in subs:
             return

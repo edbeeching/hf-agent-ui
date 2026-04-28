@@ -15,6 +15,7 @@ export interface SessionInfo {
   work_dir: string
   model: string | null
   tool: string
+  mode?: string  // "pty" or "json" (default)
   created_at: string
 }
 
@@ -34,6 +35,7 @@ interface SwitchState {
   daemons: Daemon[]
   sessions: Map<string, SessionInfo[]>
   messages: Map<string, SessionMessage[]>
+  ptyOutput: Map<string, string[]>  // sessionId -> raw terminal output chunks
 }
 
 export function useSwitch() {
@@ -43,9 +45,9 @@ export function useSwitch() {
     daemons: [],
     sessions: new Map(),
     messages: new Map(),
+    ptyOutput: new Map(),
   })
 
-  // Fetch daemons via REST
   const fetchDaemons = useCallback(async () => {
     try {
       const res = await fetch('/api/daemons')
@@ -56,7 +58,6 @@ export function useSwitch() {
     }
   }, [])
 
-  // WebSocket connection
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws`
@@ -83,7 +84,6 @@ export function useSwitch() {
 
     connect()
 
-    // Poll daemons periodically
     const interval = setInterval(fetchDaemons, 10000)
 
     return () => {
@@ -96,8 +96,9 @@ export function useSwitch() {
     const { type, daemonId, sessionId } = msg
 
     switch (type) {
+      // === JSON mode ===
       case 'session.created': {
-        const session = msg.session as SessionInfo
+        const session = { ...msg.session, mode: 'json' } as SessionInfo
         setState(s => {
           const sessions = new Map(s.sessions)
           const list = sessions.get(daemonId) || []
@@ -128,17 +129,8 @@ export function useSwitch() {
           return { ...s, messages }
         })
 
-        // Update session status on exit
         if (type === 'session.exit') {
-          setState(s => {
-            const sessions = new Map(s.sessions)
-            for (const [did, list] of sessions) {
-              sessions.set(did, list.map(sess =>
-                sess.id === sessionId ? { ...sess, status: 'stopped' } : sess
-              ))
-            }
-            return { ...s, sessions }
-          })
+          _updateSessionStatus(daemonId, sessionId, 'stopped')
         }
         break
       }
@@ -151,7 +143,51 @@ export function useSwitch() {
         })
         break
       }
+
+      // === PTY mode ===
+      case 'pty.created': {
+        const session = { ...msg.session, mode: 'pty' } as SessionInfo
+        setState(s => {
+          const sessions = new Map(s.sessions)
+          const list = sessions.get(daemonId) || []
+          sessions.set(daemonId, [...list, session])
+          return { ...s, sessions }
+        })
+        break
+      }
+
+      case 'pty.output': {
+        setState(s => {
+          const ptyOutput = new Map(s.ptyOutput)
+          const chunks = ptyOutput.get(sessionId) || []
+          ptyOutput.set(sessionId, [...chunks, msg.data])
+          return { ...s, ptyOutput }
+        })
+        break
+      }
+
+      case 'pty.started': {
+        // Already handled by pty.created
+        break
+      }
+
+      case 'pty.exit': {
+        _updateSessionStatus(daemonId, sessionId, 'stopped')
+        break
+      }
     }
+  }
+
+  function _updateSessionStatus(_daemonId: string, sessionId: string, status: string) {
+    setState(s => {
+      const sessions = new Map(s.sessions)
+      for (const [did, list] of sessions) {
+        sessions.set(did, list.map(sess =>
+          sess.id === sessionId ? { ...sess, status } : sess
+        ))
+      }
+      return { ...s, sessions }
+    })
   }
 
   const send = useCallback((data: any) => {
@@ -160,6 +196,7 @@ export function useSwitch() {
     }
   }, [])
 
+  // JSON mode
   const createSession = useCallback((
     daemonId: string,
     workDir: string,
@@ -176,6 +213,26 @@ export function useSwitch() {
     send({ type: 'session.control', daemonId, sessionId, response })
   }, [send])
 
+  // PTY mode
+  const createPtySession = useCallback((
+    daemonId: string,
+    workDir: string,
+    tool: string = 'claude',
+    cols: number = 120,
+    rows: number = 40,
+  ) => {
+    send({ type: 'pty.create', daemonId, workDir, tool, cols, rows })
+  }, [send])
+
+  const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string) => {
+    send({ type: 'pty.input', daemonId, sessionId, data })
+  }, [send])
+
+  const resizePty = useCallback((daemonId: string, sessionId: string, cols: number, rows: number) => {
+    send({ type: 'pty.resize', daemonId, sessionId, cols, rows })
+  }, [send])
+
+  // Shared
   const stopSession = useCallback((daemonId: string, sessionId: string) => {
     send({ type: 'session.stop', daemonId, sessionId })
   }, [send])
@@ -189,6 +246,9 @@ export function useSwitch() {
     createSession,
     sendMessage,
     sendControl,
+    createPtySession,
+    sendPtyInput,
+    resizePty,
     stopSession,
     listSessions,
     fetchDaemons,

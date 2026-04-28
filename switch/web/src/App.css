@@ -107,6 +107,29 @@
   background: #30363d;
 }
 
+/* Mode badge */
+.mode-badge {
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  background: #30363d;
+  color: #8b949e;
+}
+
+/* Terminal container */
+.terminal-container {
+  flex: 1;
+  overflow: hidden;
+}
+
+.terminal-container .xterm {
+  height: 100%;
+  padding: 8px;
+}
+
 /* Tool badges */
 .tool-badge {
   font-size: 9px;

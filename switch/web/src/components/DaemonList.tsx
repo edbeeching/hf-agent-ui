@@ -41,6 +41,7 @@ export function DaemonList({ daemons, sessions, selectedSession, onSelectSession
               >
                 <span className={`status-dot ${session.status}`} />
                 <span className={`tool-badge ${session.tool || 'claude'}`}>{session.tool || 'claude'}</span>
+                {session.mode === 'pty' && <span className="mode-badge">tty</span>}
                 <span className="session-dir">{session.work_dir}</span>
                 {session.model && <span className="session-model">{session.model}</span>}
               </div>
