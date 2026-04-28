@@ -7,6 +7,7 @@ import signal
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -75,6 +76,8 @@ class Session:
                 logger.exception("Error in session event callback")
 
     async def start(self) -> None:
+        # Expand ~ and env vars in work_dir
+        self.opts.work_dir = str(Path(self.opts.work_dir).expanduser().resolve())
         args = self.adapter.build_start_args(self.opts, self.opts.initial_prompt)
         await self._spawn(args)
 
