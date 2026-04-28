@@ -16,6 +16,7 @@ def main() -> None:
     hub_p.add_argument("-p", "--port", type=int, default=9341, help="Port (default: 9341)")
     hub_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
     hub_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+    hub_p.add_argument("--dev", action="store_true", help="Dev mode: auto-reload on Python changes, use Vite for frontend")
 
     # --- daemon ---
     daemon_p = sub.add_parser("daemon", help="Start a daemon on this machine")
@@ -62,6 +63,7 @@ def _run_update() -> None:
 
 def _run_hub(args: argparse.Namespace) -> None:
     import logging
+    import os
 
     import uvicorn
 
@@ -70,11 +72,20 @@ def _run_hub(args: argparse.Namespace) -> None:
         format="[switch hub] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    if args.dev:
+        os.environ["SWITCH_DEV"] = "1"
+        print("[switch hub] Dev mode — Python auto-reload enabled")
+        print("[switch hub] Run 'cd switch/web && npm run dev' in another terminal for frontend hot reload")
+        print(f"[switch hub] Then open http://localhost:5173 (Vite proxies API/WS to :{args.port})")
+
     uvicorn.run(
         "switch.hub.app:app",
         host=args.host,
         port=args.port,
         log_level="debug" if args.verbose else "info",
+        reload=args.dev,
+        reload_dirs=["switch"] if args.dev else None,
     )
 
 

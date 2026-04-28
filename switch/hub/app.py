@@ -51,7 +51,9 @@ async def ws_endpoint(ws: WebSocket) -> None:
     await relay.handle_browser(ws)
 
 
-# Serve bundled web UI
-STATIC_DIR = Path(__file__).parent / "static"
-if STATIC_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+# Serve bundled web UI (skipped in dev mode — use Vite dev server instead)
+import os
+if not os.environ.get("SWITCH_DEV"):
+    STATIC_DIR = Path(__file__).parent / "static"
+    if STATIC_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
