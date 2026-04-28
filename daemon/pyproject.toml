@@ -1,0 +1,16 @@
+[project]
+name = "switch-daemon"
+version = "0.1.0"
+description = "Switch daemon — wraps AI coding sessions (Claude Code, Codex) on remote machines"
+requires-python = ">=3.12"
+dependencies = [
+    "websockets>=15.0",
+    "httpx>=0.28.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+switch-daemon = "switch_daemon.__main__:main"
