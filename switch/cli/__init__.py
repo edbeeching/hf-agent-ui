@@ -90,6 +90,15 @@ def _run_dev() -> None:
             [sys.executable, "-m", "uvicorn", "switch.hub.app:app",
              "--host", "0.0.0.0", "--port", "9341", "--reload", "--reload-dir", "switch"],
         ))
+        # Wait for hub to be ready before starting daemon
+        import time
+        import httpx
+        for _ in range(30):
+            try:
+                httpx.get("http://localhost:9341/api/daemons", timeout=1)
+                break
+            except Exception:
+                time.sleep(0.5)
         # Daemon
         procs.append(subprocess.Popen(
             [sys.executable, "-c",
