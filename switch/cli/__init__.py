@@ -49,6 +49,44 @@ def main() -> None:
 REPO_URL = "git+ssh://git@github.com/edbeeching/switch.git"
 
 
+def _detect_reachable_ip() -> str | None:
+    """Best-effort local IP that another machine can use to reach this host."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                return ip
+    except OSError:
+        pass
+
+    try:
+        hostname = socket.gethostname()
+        for ip in socket.gethostbyname_ex(hostname)[2]:
+            if ip and not ip.startswith("127."):
+                return ip
+    except OSError:
+        pass
+
+    return None
+
+
+def _display_host_for_daemons(bind_host: str) -> str:
+    """Return the host to show in `switch daemon --hub ...` instructions."""
+    if bind_host in {"0.0.0.0", "::"}:
+        return _detect_reachable_ip() or "localhost"
+    return bind_host
+
+
+def _display_host_for_browser(bind_host: str) -> str:
+    """Return the host to open from the same machine running the hub."""
+    if bind_host in {"0.0.0.0", "::"}:
+        return "localhost"
+    return bind_host
+
+
 def _kill_port(port: int) -> None:
     """Kill any process listening on the given port."""
     import os
@@ -189,13 +227,12 @@ def _run_hub(args: argparse.Namespace) -> None:
         datefmt="%H:%M:%S",
     )
 
-    hub_url = f"http://{args.host}:{args.port}"
-    if args.host == "0.0.0.0":
-        hub_url = f"http://localhost:{args.port}"
+    daemon_url = f"http://{_display_host_for_daemons(args.host)}:{args.port}"
+    browser_url = f"http://{_display_host_for_browser(args.host)}:{args.port}"
 
     print()
     print(f"  [switch hub] To connect daemons:")
-    print(f"    switch daemon --hub {hub_url}")
+    print(f"    switch daemon --hub {daemon_url}")
     print()
     if args.dev:
         os.environ["SWITCH_DEV"] = "1"
@@ -203,12 +240,14 @@ def _run_hub(args: argparse.Namespace) -> None:
         print(f"  [switch hub] Run 'cd switch/web && npm run dev' for frontend hot reload")
         print(f"  [switch hub] Open http://localhost:5173")
     else:
-        print(f"  [switch hub] Open {hub_url}")
+        print(f"  [switch hub] Open {browser_url}")
+        if daemon_url != browser_url:
+            print(f"  [switch hub] Network URL {daemon_url}")
     print()
 
     import threading
     import webbrowser
-    open_url = "http://localhost:5173" if args.dev else hub_url
+    open_url = "http://localhost:5173" if args.dev else browser_url
     threading.Timer(1.5, webbrowser.open, args=[open_url]).start()
 
     uvicorn.run(
