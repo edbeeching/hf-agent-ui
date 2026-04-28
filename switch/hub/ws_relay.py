@@ -78,6 +78,7 @@ class WsRelay:
         """Called by the connection pool when a daemon sends a message."""
         # Inject daemonId so browser knows which daemon it came from
         msg["daemonId"] = daemon_id
+        logger.debug("relay to %d browsers: %s", len(self._clients), msg.get("type", "?"))
         # Broadcast to all connected browsers
         await self._broadcast(msg)
 

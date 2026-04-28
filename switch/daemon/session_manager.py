@@ -13,11 +13,11 @@ class SessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
 
-    async def create(self, opts: SessionOptions) -> Session:
+    def create(self, opts: SessionOptions) -> Session:
+        """Create a session without starting it. Call session.start() after subscribing."""
         adapter = get_adapter(opts.tool)
         session = Session(opts, adapter)
         self._sessions[session.id] = session
-        await session.start()
         logger.info("Created session %s in %s", session.id, opts.work_dir)
         return session
 

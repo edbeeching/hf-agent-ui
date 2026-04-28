@@ -50,6 +50,7 @@ class DaemonConnection:
                     async for raw in ws:
                         try:
                             msg = json.loads(raw)
+                            logger.debug("from daemon %s: %s", self.daemon.name, msg.get("type", "?"))
                             await self._on_message(self.daemon.id, msg)
                         except json.JSONDecodeError:
                             logger.warning("Invalid JSON from daemon %s", self.daemon.name)

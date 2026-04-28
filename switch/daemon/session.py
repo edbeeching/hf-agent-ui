@@ -69,6 +69,7 @@ class Session:
         self._callbacks = [c for c in self._callbacks if c is not cb]
 
     async def _emit(self, event: dict[str, Any]) -> None:
+        logger.debug("emit %s to %d callbacks", event.get("type", "?"), len(self._callbacks))
         for cb in self._callbacks:
             try:
                 await cb(event)
@@ -104,6 +105,7 @@ class Session:
             async for line in self._proc.stderr:
                 text = line.decode().rstrip("\n")
                 if text:
+                    logger.debug("stderr: %s", text[:200])
                     await self._emit({
                         "type": "session.stderr",
                         "sessionId": self.id,
@@ -125,6 +127,7 @@ class Session:
                 # Try to extract the tool's internal session ID for resume support
                 self._extract_tool_session_id(msg)
 
+                logger.debug("stdout event: %s", msg.get("type", "?"))
                 await self._emit({
                     "type": "session.message",
                     "sessionId": self.id,
@@ -133,6 +136,7 @@ class Session:
         finally:
             stderr_task.cancel()
             return_code = await self._proc.wait()
+            logger.info("Process exited with code %s", return_code)
             self.status = SessionStatus.STOPPED
             await self._emit({
                 "type": "session.exit",

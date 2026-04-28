@@ -86,11 +86,12 @@ class DaemonWsServer:
                     system_prompt=req.get("systemPrompt"),
                     initial_prompt=req.get("initialPrompt"),
                 )
-                session = await self.manager.create(opts)
+                session = self.manager.create(opts)
                 self._subscribe(ws, session)
+                await session.start()
                 await self._send(ws, {
                     "type": "session.created",
-                    "session": self.manager.get(session.id) and json.loads(
+                    "session": json.loads(
                         json.dumps(session.to_info().__dict__, default=str)
                     ),
                 })
@@ -182,9 +183,10 @@ class DaemonWsServer:
 
         async def on_event(event: dict[str, Any]) -> None:
             try:
+                logger.debug("forwarding %s to hub", event.get("type", "?"))
                 await self._send(ws, event)
             except Exception:
-                pass
+                logger.exception("Failed to forward event to hub")
 
         session.on_event(on_event)
         # Store callback ref for cleanup
