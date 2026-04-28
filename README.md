@@ -14,7 +14,7 @@ Browser <--WS--> Hub (FastAPI) <--WS--> Daemon (Python) <--stdio--> Claude / Cod
 ## Install
 
 ```bash
-uv tool install git+https://github.com/edbeeching/switch.git
+uv tool install git+ssh://git@github.com/edbeeching/switch.git
 ```
 
 To update:

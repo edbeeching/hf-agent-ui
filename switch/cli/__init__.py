@@ -40,7 +40,7 @@ def main() -> None:
         sys.exit(1)
 
 
-REPO_URL = "git+https://github.com/edbeeching/switch.git"
+REPO_URL = "git+ssh://git@github.com/edbeeching/switch.git"
 
 
 def _run_update() -> None:
