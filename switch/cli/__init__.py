@@ -25,6 +25,9 @@ def main() -> None:
     daemon_p.add_argument("-n", "--name", default=None, help="Display name (default: daemon-<port>)")
     daemon_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
 
+    # --- dev ---
+    sub.add_parser("dev", help="Start hub + daemon + frontend dev server (all-in-one)")
+
     # --- update ---
     sub.add_parser("update", help="Update switch to the latest version")
 
@@ -34,6 +37,8 @@ def main() -> None:
         _run_hub(args)
     elif args.command == "daemon":
         _run_daemon(args)
+    elif args.command == "dev":
+        _run_dev()
     elif args.command == "update":
         _run_update()
     else:
@@ -59,6 +64,64 @@ def _run_update() -> None:
         check=True,
     )
     print("Updated successfully.")
+
+
+def _run_dev() -> None:
+    import os
+    import signal
+    import subprocess
+    from pathlib import Path
+
+    os.environ["SWITCH_DEV"] = "1"
+    web_dir = Path(__file__).parent.parent / "web"
+
+    if not (web_dir / "package.json").exists():
+        print("Error: switch/web not found — switch dev requires a repo checkout", file=sys.stderr)
+        sys.exit(1)
+
+    if not (web_dir / "node_modules").exists():
+        print("[switch dev] Installing frontend dependencies...")
+        subprocess.run(["npm", "install"], cwd=web_dir, check=True)
+
+    procs: list[subprocess.Popen] = []
+    try:
+        # Hub with auto-reload
+        procs.append(subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "switch.hub.app:app",
+             "--host", "0.0.0.0", "--port", "9341", "--reload", "--reload-dir", "switch"],
+        ))
+        # Daemon
+        procs.append(subprocess.Popen(
+            [sys.executable, "-c",
+             "from switch.cli import _run_daemon; import argparse; "
+             "args = argparse.Namespace(port=9340, hub='http://localhost:9341', name='local', verbose=False); "
+             "_run_daemon(args)"],
+        ))
+        # Vite dev server
+        procs.append(subprocess.Popen(
+            ["npx", "vite", "--port", "5173"],
+            cwd=web_dir,
+        ))
+
+        print("[switch dev] Starting hub (:9341), daemon, and frontend (:5173)")
+        print("[switch dev] Open http://localhost:5173")
+        print("[switch dev] Press Ctrl+C to stop all")
+
+        # Wait for any process to exit
+        while True:
+            for p in procs:
+                ret = p.poll()
+                if ret is not None:
+                    raise KeyboardInterrupt
+            import time
+            time.sleep(0.5)
+
+    except KeyboardInterrupt:
+        print("\n[switch dev] Stopping...")
+        for p in procs:
+            p.send_signal(signal.SIGTERM)
+        for p in procs:
+            p.wait(timeout=5)
 
 
 def _run_hub(args: argparse.Namespace) -> None:
