@@ -14,56 +14,33 @@ Browser <--WS--> Hub (FastAPI) <--WS--> Daemon (Python) <--stdio--> Claude / Cod
 
 ## Quick Start
 
-### 1. Start the hub
-
 ```bash
-cd hub
+# Install
 uv sync
-uv run switch-hub
-# or: uv run switch-hub --port 9341 --verbose
-```
 
-### 2. Start a daemon (on each machine)
+# Terminal 1 — start the hub
+uv run switch hub
 
-```bash
-cd daemon
-uv sync
-uv run switch-daemon --hub http://<hub-host>:9341
-# or: uv run switch-daemon --port 9340 --name my-server --verbose
-```
+# Terminal 2 — start a daemon
+uv run switch daemon
 
-### 3. Open the web UI
-
-```bash
-cd web
-npm install
-npm run dev
+# Terminal 3 — start the web UI
+uv run switch web
 # Open http://localhost:5173
+```
+
+For remote machines, point the daemon at your hub:
+
+```bash
+uv run switch daemon --hub http://<hub-host>:9341 --name my-server
 ```
 
 ## CLI Reference
 
-### switch-hub
-
 ```
-usage: switch-hub [-h] [-p PORT] [--host HOST] [-v]
-
-options:
-  -p, --port PORT    HTTP/WebSocket port (default: 9341)
-  --host HOST        Bind address (default: 0.0.0.0)
-  -v, --verbose      Debug logging
-```
-
-### switch-daemon
-
-```
-usage: switch-daemon [-h] [-p PORT] [--hub HUB] [-n NAME] [-v]
-
-options:
-  -p, --port PORT    WebSocket port (default: 9340)
-  --hub HUB          Hub URL (default: http://localhost:9341)
-  -n, --name NAME    Display name (default: daemon-<port>)
-  -v, --verbose      Debug logging
+switch hub     [-p PORT] [--host HOST] [-v]     Start the hub (default :9341)
+switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]  Start a daemon (default :9340)
+switch web     [-p PORT]                        Start the web UI (default :5173)
 ```
 
 ## Supported Tools
