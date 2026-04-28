@@ -36,14 +36,15 @@ export function DaemonList({ daemons, sessions, selectedSession, onSelectSession
             {daemonSessions.map(session => (
               <div
                 key={session.id}
-                className={`session-item ${selectedSession?.sessionId === session.id ? 'selected' : ''}`}
+                className={`session-item ${selectedSession?.sessionId === session.id ? 'selected' : ''} ${session.needs_input ? 'needs-input' : ''}`}
                 onClick={() => onSelectSession(daemon.id, session.id)}
+                title={session.needs_input ? session.needs_input_reason || 'Human input required' : undefined}
               >
                 <span className={`status-dot ${session.status}`} />
+                {session.needs_input && <span className="input-required-badge">!</span>}
                 <span className={`tool-badge ${session.tool || 'claude'}`}>{session.tool || 'claude'}</span>
                 {session.mode === 'pty' && <span className="mode-badge">tty</span>}
                 <span className="session-dir">{session.work_dir}</span>
-                {session.model && <span className="session-model">{session.model}</span>}
               </div>
             ))}
           </div>

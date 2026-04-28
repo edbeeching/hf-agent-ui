@@ -1,46 +1,63 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSwitch } from './hooks/useSwitch'
-import type { SessionInfo } from './hooks/useSwitch'
 import { DaemonList } from './components/DaemonList'
-import { SessionView } from './components/SessionView'
 import { TerminalView } from './components/TerminalView'
-import { MessageInput } from './components/MessageInput'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import './App.css'
 
+const SELECTED_SESSION_STORAGE_KEY = 'switch.selectedSession'
+
 function App() {
   const sw = useSwitch()
-  const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(null)
+  const {
+    connected,
+    daemons,
+    sessions,
+    ptyOutput,
+    createPtySession,
+    sendPtyInput,
+    resizePty,
+    listSessions,
+    subscribeSession,
+  } = sw
+  const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(() => readStoredSelection())
   const [newSessionDaemonId, setNewSessionDaemonId] = useState<string | null>(null)
 
-  const selectedMessages = selected ? sw.messages.get(selected.sessionId) || [] : []
-  const selectedPtyOutput = selected ? sw.ptyOutput.get(selected.sessionId) || [] : []
+  const selectedPtyOutput = selected ? ptyOutput.get(selected.sessionId) || [] : []
   const newSessionDaemon = newSessionDaemonId
-    ? sw.daemons.find(d => d.id === newSessionDaemonId)
+    ? daemons.find(d => d.id === newSessionDaemonId)
     : null
 
-  // Find selected session info to determine mode
-  let selectedSession: SessionInfo | null = null
-  if (selected) {
-    for (const [, list] of sw.sessions) {
-      const found = list.find(s => s.id === selected.sessionId)
-      if (found) { selectedSession = found; break }
+  useEffect(() => {
+    if (!connected) return
+    daemons
+      .filter(daemon => daemon.connected)
+      .forEach(daemon => listSessions(daemon.id))
+  }, [connected, daemons, listSessions])
+
+  useEffect(() => {
+    if (selected) {
+      window.localStorage.setItem(SELECTED_SESSION_STORAGE_KEY, JSON.stringify(selected))
+      if (connected) {
+        subscribeSession(selected.daemonId, selected.sessionId)
+      }
+    } else {
+      window.localStorage.removeItem(SELECTED_SESSION_STORAGE_KEY)
     }
-  }
-  const isPty = selectedSession?.mode === 'pty'
+  }, [connected, selected, subscribeSession])
 
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="sidebar-title">
           <h1>Switch</h1>
-          <span className={`connection-badge ${sw.connected ? 'connected' : ''}`}>
-            {sw.connected ? 'Connected' : 'Disconnected'}
+          <span className={`connection-badge ${connected ? 'connected' : ''}`}>
+            {connected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
         <DaemonList
-          daemons={sw.daemons}
-          sessions={sw.sessions}
+          daemons={daemons}
+          sessions={sessions}
           selectedSession={selected}
           onSelectSession={(daemonId, sessionId) => setSelected({ daemonId, sessionId })}
           onNewSession={daemonId => setNewSessionDaemonId(daemonId)}
@@ -48,41 +65,24 @@ function App() {
       </aside>
 
       <main className="main-panel">
-        {isPty && selected ? (
-          <TerminalView
-            sessionId={selected.sessionId}
-            daemonId={selected.daemonId}
-            output={selectedPtyOutput}
-            onInput={data => sw.sendPtyInput(selected.daemonId, selected.sessionId, data)}
-            onResize={(cols, rows) => sw.resizePty(selected.daemonId, selected.sessionId, cols, rows)}
-          />
-        ) : (
-          <>
-            <SessionView
-              messages={selectedMessages}
-              sessionId={selected?.sessionId || ''}
-            />
-            <MessageInput
-              disabled={!selected}
-              onSend={msg => {
-                if (selected) {
-                  sw.sendMessage(selected.daemonId, selected.sessionId, msg)
-                }
-              }}
-            />
-          </>
-        )}
+        <TerminalView
+          sessionId={selected?.sessionId || ''}
+          output={selectedPtyOutput}
+          onInput={data => {
+            if (selected) sendPtyInput(selected.daemonId, selected.sessionId, data)
+          }}
+          onResize={(cols, rows) => {
+            if (selected) resizePty(selected.daemonId, selected.sessionId, cols, rows)
+          }}
+        />
       </main>
 
       {newSessionDaemon && (
         <NewSessionDialog
           daemon={newSessionDaemon}
           onClose={() => setNewSessionDaemonId(null)}
-          onCreateJson={(daemonId, workDir, opts) => {
-            sw.createSession(daemonId, workDir, opts)
-          }}
-          onCreatePty={(daemonId, workDir, tool) => {
-            sw.createPtySession(daemonId, workDir, tool)
+          onCreate={(daemonId, workDir, tool) => {
+            createPtySession(daemonId, workDir, tool)
           }}
         />
       )}
@@ -91,3 +91,17 @@ function App() {
 }
 
 export default App
+
+function readStoredSelection(): { daemonId: string; sessionId: string } | null {
+  try {
+    const raw = window.localStorage.getItem(SELECTED_SESSION_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { daemonId?: unknown; sessionId?: unknown }
+    if (typeof parsed.daemonId !== 'string' || typeof parsed.sessionId !== 'string') {
+      return null
+    }
+    return { daemonId: parsed.daemonId, sessionId: parsed.sessionId }
+  } catch {
+    return null
+  }
+}

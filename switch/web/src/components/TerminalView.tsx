@@ -6,7 +6,6 @@ import 'xterm/css/xterm.css'
 
 interface Props {
   sessionId: string
-  daemonId: string
   onInput: (data: string) => void
   onResize: (cols: number, rows: number) => void
   output: string[]

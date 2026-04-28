@@ -9,8 +9,7 @@ import websockets
 from websockets.asyncio.server import Server, ServerConnection
 
 from .pty_session import PtySession
-from .session import Session
-from .session_manager import AnySession, SessionManager, SessionOptions
+from .session_manager import AnySession, SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,19 +21,21 @@ class DaemonWsServer:
     Protocol (client = hub, server = daemon):
 
     Client -> Server:
-      { type: "session.create", workDir, model?, permissionMode?, allowedTools?, systemPrompt? }
-      { type: "session.send", sessionId, message }
-      { type: "session.control", sessionId, response: {...} }
+      { type: "pty.create", workDir, tool?, cols?, rows? }
+      { type: "pty.input", sessionId, data }
+      { type: "pty.resize", sessionId, cols, rows }
       { type: "session.stop", sessionId }
       { type: "session.remove", sessionId }
       { type: "session.list" }
       { type: "session.subscribe", sessionId }
 
     Server -> Client:
-      { type: "session.created", session: SessionInfo }
-      { type: "session.message", sessionId, data }
-      { type: "session.stderr", sessionId, text }
-      { type: "session.exit", sessionId, code }
+      { type: "pty.created", session: PtySessionInfo }
+      { type: "pty.output", sessionId, data }
+      { type: "pty.exit", sessionId, code }
+      { type: "session.input_required", sessionId, reason, source }
+      { type: "session.input_resolved", sessionId }
+      { type: "session.subscribed", session, ptyOutput? }
       { type: "session.list", sessions: [...] }
       { type: "error", message, requestType? }
     """
@@ -77,26 +78,6 @@ class DaemonWsServer:
         msg_type = req.get("type", "")
 
         match msg_type:
-            case "session.create":
-                opts = SessionOptions(
-                    work_dir=req.get("workDir", "."),
-                    tool=req.get("tool", "claude"),
-                    model=req.get("model"),
-                    permission_mode=req.get("permissionMode"),
-                    allowed_tools=req.get("allowedTools"),
-                    system_prompt=req.get("systemPrompt"),
-                    initial_prompt=req.get("initialPrompt"),
-                )
-                session = self.manager.create(opts)
-                self._subscribe(ws, session)
-                await session.start()
-                await self._send(ws, {
-                    "type": "session.created",
-                    "session": json.loads(
-                        json.dumps(session.to_info().__dict__, default=str)
-                    ),
-                })
-
             case "pty.create":
                 tool = req.get("tool", "claude")
                 work_dir = req.get("workDir", ".")
@@ -129,42 +110,6 @@ class DaemonWsServer:
                     return
                 session.resize(req.get("cols", 120), req.get("rows", 40))
 
-            case "session.send":
-                session = self.manager.get(req.get("sessionId", ""))
-                if not session:
-                    await self._send(ws, {
-                        "type": "error",
-                        "message": f"Session not found: {req.get('sessionId')}",
-                        "requestType": msg_type,
-                    })
-                    return
-                try:
-                    await session.send(req["message"])
-                except Exception as e:
-                    await self._send(ws, {
-                        "type": "error",
-                        "message": str(e),
-                        "requestType": msg_type,
-                    })
-
-            case "session.control":
-                session = self.manager.get(req.get("sessionId", ""))
-                if not session:
-                    await self._send(ws, {
-                        "type": "error",
-                        "message": f"Session not found: {req.get('sessionId')}",
-                        "requestType": msg_type,
-                    })
-                    return
-                try:
-                    await session.send_control(req["response"])
-                except Exception as e:
-                    await self._send(ws, {
-                        "type": "error",
-                        "message": str(e),
-                        "requestType": msg_type,
-                    })
-
             case "session.subscribe":
                 session = self.manager.get(req.get("sessionId", ""))
                 if not session:
@@ -174,11 +119,14 @@ class DaemonWsServer:
                         "requestType": msg_type,
                     })
                     return
-                self._subscribe(ws, session)
-                await self._send(ws, {
+                self._subscribe_any(ws, session)
+                payload: dict[str, Any] = {
                     "type": "session.subscribed",
                     "session": json.loads(json.dumps(session.to_info().__dict__, default=str)),
-                })
+                }
+                if isinstance(session, PtySession):
+                    payload["ptyOutput"] = session.get_output_buffer()
+                await self._send(ws, payload)
 
             case "session.stop":
                 if not self.manager.stop(req.get("sessionId", "")):
@@ -207,9 +155,6 @@ class DaemonWsServer:
                     "type": "error",
                     "message": f"Unknown request type: {msg_type}",
                 })
-
-    def _subscribe(self, ws: ServerConnection, session: Session) -> None:
-        self._subscribe_any(ws, session)
 
     def _subscribe_any(self, ws: ServerConnection, session: AnySession) -> None:
         subs = self._subscriptions.get(ws)

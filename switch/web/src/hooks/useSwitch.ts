@@ -15,36 +15,18 @@ export interface SessionInfo {
   id: string
   status: string
   work_dir: string
-  model: string | null
   tool: string
-  mode?: string  // "pty" or "json" (default)
+  mode: 'pty'
   created_at: string
-}
-
-export interface SessionMessage {
-  id: string
-  daemonId: string
-  sessionId: string
-  type: 'message' | 'stderr' | 'exit' | 'started'
-  data?: unknown
-  text?: string
-  code?: number | null
-  timestamp: string
+  needs_input: boolean
+  needs_input_reason: string | null
 }
 
 interface SwitchState {
   connected: boolean
   daemons: Daemon[]
   sessions: Map<string, SessionInfo[]>
-  messages: Map<string, SessionMessage[]>
   ptyOutput: Map<string, string[]>  // sessionId -> raw terminal output chunks
-}
-
-interface CreateSessionOptions {
-  tool?: string
-  model?: string
-  permissionMode?: string
-  initialPrompt?: string
 }
 
 interface ServerMessage {
@@ -54,8 +36,9 @@ interface ServerMessage {
   session?: SessionInfo
   sessions?: SessionInfo[]
   data?: unknown
-  text?: string
-  code?: number | null
+  ptyOutput?: string[]
+  reason?: string
+  source?: string
 }
 
 export function useSwitch() {
@@ -64,7 +47,6 @@ export function useSwitch() {
     connected: false,
     daemons: [],
     sessions: new Map(),
-    messages: new Map(),
     ptyOutput: new Map(),
   })
 
@@ -90,72 +72,67 @@ export function useSwitch() {
     })
   }, [])
 
+  const updateSessionInputRequired = useCallback((
+    sessionId: string,
+    needsInput: boolean,
+    reason: string | null = null,
+  ) => {
+    setState(s => {
+      const sessions = new Map(s.sessions)
+      for (const [did, list] of sessions) {
+        sessions.set(did, list.map(sess =>
+          sess.id === sessionId
+            ? { ...sess, needs_input: needsInput, needs_input_reason: needsInput ? reason : null }
+            : sess
+        ))
+      }
+      return { ...s, sessions }
+    })
+  }, [])
+
   const handleMessage = useCallback((msg: ServerMessage) => {
     const { type, daemonId, sessionId } = msg
 
     switch (type) {
-      // === JSON mode ===
-      case 'session.created': {
-        if (!daemonId || !msg.session) return
-        const session = { ...msg.session, mode: 'json' } as SessionInfo
-        setState(s => {
-          const sessions = new Map(s.sessions)
-          const list = sessions.get(daemonId) || []
-          if (list.some(s => s.id === session.id)) return s  // deduplicate
-          sessions.set(daemonId, [...list, session])
-          return { ...s, sessions }
-        })
-        break
-      }
-
-      case 'session.message':
-      case 'session.stderr':
-      case 'session.exit':
-      case 'session.started': {
-        if (!daemonId || !sessionId) return
-        const entry: SessionMessage = {
-          id: crypto.randomUUID(),
-          daemonId,
-          sessionId,
-          type: type.replace('session.', '') as SessionMessage['type'],
-          data: msg.data,
-          text: msg.text,
-          code: msg.code,
-          timestamp: new Date().toISOString(),
-        }
-        setState(s => {
-          const messages = new Map(s.messages)
-          const list = messages.get(sessionId) || []
-          messages.set(sessionId, [...list, entry])
-          return { ...s, messages }
-        })
-
-        if (type === 'session.exit') {
-          updateSessionStatus(sessionId, 'stopped')
-        }
-        break
-      }
-
       case 'session.list': {
         if (!daemonId || !msg.sessions) return
         setState(s => {
           const sessions = new Map(s.sessions)
-          sessions.set(daemonId, msg.sessions || [])
+          sessions.set(daemonId, (msg.sessions || [])
+            .filter(session => session.mode === 'pty')
+            .map(normalizeSession))
           return { ...s, sessions }
         })
         break
       }
 
-      // === PTY mode ===
       case 'pty.created': {
         if (!daemonId || !msg.session) return
-        const session = { ...msg.session, mode: 'pty' } as SessionInfo
+        const session = normalizeSession(msg.session)
         setState(s => {
           const sessions = new Map(s.sessions)
           const list = sessions.get(daemonId) || []
           if (list.some(s => s.id === session.id)) return s
           sessions.set(daemonId, [...list, session])
           return { ...s, sessions }
+        })
+        break
+      }
+
+      case 'session.subscribed': {
+        if (!daemonId || !msg.session) return
+        const session = normalizeSession(msg.session)
+        setState(s => {
+          const sessions = new Map(s.sessions)
+          const list = sessions.get(daemonId) || []
+          sessions.set(daemonId, upsertSession(list, session))
+
+          const ptyOutput = new Map(s.ptyOutput)
+          if (Array.isArray(msg.ptyOutput)) {
+            ptyOutput.set(session.id, msg.ptyOutput)
+          }
+
+          return { ...s, sessions, ptyOutput }
         })
         break
       }
@@ -178,11 +155,24 @@ export function useSwitch() {
 
       case 'pty.exit': {
         if (!sessionId) return
+        updateSessionInputRequired(sessionId, false)
         updateSessionStatus(sessionId, 'stopped')
         break
       }
+
+      case 'session.input_required': {
+        if (!sessionId) return
+        updateSessionInputRequired(sessionId, true, msg.reason || 'Human input required')
+        break
+      }
+
+      case 'session.input_resolved': {
+        if (!sessionId) return
+        updateSessionInputRequired(sessionId, false)
+        break
+      }
     }
-  }, [updateSessionStatus])
+  }, [updateSessionInputRequired, updateSessionStatus])
 
   useEffect(() => {
     let disposed = false
@@ -230,24 +220,6 @@ export function useSwitch() {
     }
   }, [])
 
-  // JSON mode
-  const createSession = useCallback((
-    daemonId: string,
-    workDir: string,
-    opts?: CreateSessionOptions,
-  ) => {
-    send({ type: 'session.create', daemonId, workDir, ...opts })
-  }, [send])
-
-  const sendMessage = useCallback((daemonId: string, sessionId: string, message: string) => {
-    send({ type: 'session.send', daemonId, sessionId, message })
-  }, [send])
-
-  const sendControl = useCallback((daemonId: string, sessionId: string, response: unknown) => {
-    send({ type: 'session.control', daemonId, sessionId, response })
-  }, [send])
-
-  // PTY mode
   const createPtySession = useCallback((
     daemonId: string,
     workDir: string,
@@ -260,7 +232,8 @@ export function useSwitch() {
 
   const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string) => {
     send({ type: 'pty.input', daemonId, sessionId, data })
-  }, [send])
+    if (data) updateSessionInputRequired(sessionId, false)
+  }, [send, updateSessionInputRequired])
 
   const resizePty = useCallback((daemonId: string, sessionId: string, cols: number, rows: number) => {
     send({ type: 'pty.resize', daemonId, sessionId, cols, rows })
@@ -275,16 +248,34 @@ export function useSwitch() {
     send({ type: 'session.list', daemonId })
   }, [send])
 
+  const subscribeSession = useCallback((daemonId: string, sessionId: string) => {
+    send({ type: 'session.subscribe', daemonId, sessionId })
+  }, [send])
+
   return {
     ...state,
-    createSession,
-    sendMessage,
-    sendControl,
     createPtySession,
     sendPtyInput,
     resizePty,
     stopSession,
     listSessions,
+    subscribeSession,
     fetchDaemons,
   }
+}
+
+function normalizeSession(session: SessionInfo): SessionInfo {
+  return {
+    ...session,
+    mode: 'pty',
+    needs_input: Boolean(session.needs_input),
+    needs_input_reason: session.needs_input_reason || null,
+  }
+}
+
+function upsertSession(list: SessionInfo[], session: SessionInfo): SessionInfo[] {
+  if (list.some(s => s.id === session.id)) {
+    return list.map(s => s.id === session.id ? session : s)
+  }
+  return [...list, session]
 }
