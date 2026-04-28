@@ -54,7 +54,7 @@ def _run_hub(args: argparse.Namespace) -> None:
         datefmt="%H:%M:%S",
     )
     uvicorn.run(
-        "switch_hub.app:app",
+        "switch.hub.app:app",
         host=args.host,
         port=args.port,
         log_level="debug" if args.verbose else "info",
@@ -66,9 +66,9 @@ def _run_daemon(args: argparse.Namespace) -> None:
     import logging
     import signal
 
-    from switch_daemon.registration import HubRegistration
-    from switch_daemon.session_manager import SessionManager
-    from switch_daemon.ws_server import DaemonWsServer
+    from switch.daemon.registration import HubRegistration
+    from switch.daemon.session_manager import SessionManager
+    from switch.daemon.ws_server import DaemonWsServer
 
     name = args.name or f"daemon-{args.port}"
 
@@ -110,7 +110,7 @@ def _run_daemon(args: argparse.Namespace) -> None:
 
 
 def _run_web(args: argparse.Namespace) -> None:
-    web_dir = Path(__file__).parent.parent / "web"
+    web_dir = Path(__file__).parent.parent.parent / "web"
     if not (web_dir / "package.json").exists():
         print(f"Error: web directory not found at {web_dir}", file=sys.stderr)
         sys.exit(1)
