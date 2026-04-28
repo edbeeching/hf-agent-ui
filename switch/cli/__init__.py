@@ -24,15 +24,40 @@ def main() -> None:
     daemon_p.add_argument("-n", "--name", default=None, help="Display name (default: daemon-<port>)")
     daemon_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
 
+    # --- update ---
+    sub.add_parser("update", help="Update switch to the latest version")
+
     args = parser.parse_args()
 
     if args.command == "hub":
         _run_hub(args)
     elif args.command == "daemon":
         _run_daemon(args)
+    elif args.command == "update":
+        _run_update()
     else:
         parser.print_help()
         sys.exit(1)
+
+
+REPO_URL = "git+https://github.com/edbeeching/switch.git"
+
+
+def _run_update() -> None:
+    import shutil
+    import subprocess
+
+    uv = shutil.which("uv")
+    if not uv:
+        print("Error: uv not found on PATH", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Updating switch from {REPO_URL} ...")
+    subprocess.run(
+        [uv, "tool", "install", "--force", "--reinstall", REPO_URL],
+        check=True,
+    )
+    print("Updated successfully.")
 
 
 def _run_hub(args: argparse.Namespace) -> None:

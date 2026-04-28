@@ -20,7 +20,7 @@ uv tool install git+https://github.com/edbeeching/switch.git
 To update:
 
 ```bash
-uv tool install --force --reinstall git+https://github.com/edbeeching/switch.git
+switch update
 ```
 
 ## Quick Start
@@ -40,6 +40,7 @@ switch daemon --hub http://<hub-host>:9341
 ```
 switch hub     [-p PORT] [--host HOST] [-v]          Start the hub + web UI (default :9341)
 switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]  Start a daemon (default :9340)
+switch update                                        Update to the latest version
 ```
 
 ## Supported Tools
