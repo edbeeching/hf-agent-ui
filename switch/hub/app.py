@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     app.state.pool = pool
     app.state.relay = relay
 
-    await registry.start_prune_loop()
+    await registry.start_prune_loop(interval=5.0)
     logger.info("Hub started")
 
     yield

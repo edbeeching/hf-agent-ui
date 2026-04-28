@@ -3,6 +3,7 @@ import type { Daemon } from '../hooks/useSwitch'
 
 interface Props {
   daemon: Daemon
+  recentWorkDirs: string[]
   onClose: () => void
   onCreate: (
     daemonId: string,
@@ -11,9 +12,9 @@ interface Props {
   ) => void
 }
 
-export function NewSessionDialog({ daemon, onClose, onCreate }: Props) {
+export function NewSessionDialog({ daemon, recentWorkDirs, onClose, onCreate }: Props) {
   const [tool, setTool] = useState('claude')
-  const [workDir, setWorkDir] = useState('~')
+  const [workDir, setWorkDir] = useState(recentWorkDirs[0] || '~')
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -35,6 +36,18 @@ export function NewSessionDialog({ daemon, onClose, onCreate }: Props) {
           </label>
           <label>
             Working directory
+            {recentWorkDirs.length > 0 && (
+              <select
+                className="recent-dir-select"
+                value={recentWorkDirs.includes(workDir) ? workDir : ''}
+                onChange={e => setWorkDir(e.target.value || workDir)}
+              >
+                <option value="">Recent directories</option>
+                {recentWorkDirs.map(dir => (
+                  <option key={dir} value={dir}>{dir}</option>
+                ))}
+              </select>
+            )}
             <input
               type="text"
               value={workDir}

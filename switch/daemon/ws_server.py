@@ -142,11 +142,17 @@ class DaemonWsServer:
                     })
 
             case "session.remove":
-                if not self.manager.remove(req.get("sessionId", "")):
+                session_id = req.get("sessionId", "")
+                if not self.manager.remove(session_id):
                     await self._send(ws, {
                         "type": "error",
-                        "message": f"Session not found: {req.get('sessionId')}",
+                        "message": f"Session not found: {session_id}",
                         "requestType": msg_type,
+                    })
+                else:
+                    await self._send(ws, {
+                        "type": "session.removed",
+                        "sessionId": session_id,
                     })
 
             case "session.list":
