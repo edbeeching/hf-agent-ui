@@ -176,7 +176,7 @@ class DaemonWsServer:
 
     def _subscribe(self, ws: ServerConnection, session: Session) -> None:
         subs = self._subscriptions.get(ws)
-        if not subs or session.id in subs:
+        if subs is None or session.id in subs:
             return
         subs.add(session.id)
 
