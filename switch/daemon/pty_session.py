@@ -27,7 +27,7 @@ from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
-type EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
+EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 MAX_OUTPUT_BUFFER_BYTES = 1_000_000
 

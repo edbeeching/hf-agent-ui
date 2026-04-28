@@ -12,7 +12,7 @@ from .daemon_registry import DaemonInfo
 
 logger = logging.getLogger(__name__)
 
-type MessageCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
+MessageCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
 
 
 class DaemonConnection:
