@@ -116,8 +116,9 @@ function StreamEventBlock({ data }: { data: any }) {
     }
   }
 
-  if (data.type === 'stream_event') {
-    return null
+  // Claude wraps events as { type: "stream_event", event: { ... } } — unwrap and render the inner event
+  if (data.type === 'stream_event' && data.event) {
+    return <StreamEventBlock data={data.event} />
   }
 
   // === Codex CLI events ===
