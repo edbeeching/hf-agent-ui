@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 MAX_OUTPUT_BUFFER_BYTES = 1_000_000
+PAUSE_EXIT_COMMAND = "/exit\r"
+PAUSE_EXIT_GRACE_SECONDS = 5.0
 
 TOOL_COMMANDS: dict[str, list[str]] = {
     "claude": ["claude"],
@@ -77,6 +79,7 @@ class PtySession:
         self._proc: subprocess.Popen | None = None
         self._read_task: asyncio.Task | None = None
         self._hook_task: asyncio.Task | None = None
+        self._pause_fallback_task: asyncio.Task | None = None
         self._callbacks: list[EventCallback] = []
         self._recent_output = ""
         self._output_buffer: list[str] = []
@@ -102,6 +105,7 @@ class PtySession:
     async def resume(self) -> None:
         if self.status == "running":
             return
+        await self._finish_pending_pause()
         await self._spawn(resume=True)
 
     async def _spawn(self, *, resume: bool) -> None:
@@ -137,6 +141,9 @@ class PtySession:
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
         self.status = "running"
+        if self._pause_fallback_task:
+            self._pause_fallback_task.cancel()
+            self._pause_fallback_task = None
         logger.info("PTY session %s started (pid=%d, tool=%s)", self.id, self._proc.pid, self.tool)
         await self._emit({"type": "pty.started", "sessionId": self.id})
 
@@ -196,6 +203,10 @@ class PtySession:
                 code = self._proc.wait()
             self.status = self._exit_status
             self._exit_status = "stopped"
+            self._close_master_fd()
+            if self._pause_fallback_task:
+                self._pause_fallback_task.cancel()
+                self._pause_fallback_task = None
             logger.info("PTY process exited with code %s", code)
             await self._mark_input_resolved()
             await self._emit({
@@ -254,15 +265,51 @@ class PtySession:
             fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
 
     def stop(self) -> None:
-        if self._proc and self.status == "running":
+        if self._pause_fallback_task:
+            self._pause_fallback_task.cancel()
+            self._pause_fallback_task = None
+        if self._proc and self._proc.poll() is None:
             self._exit_status = "stopped"
+            self._terminate_process()
+            self.status = "stopped"
+            if self.needs_input:
+                self._schedule_input_resolved()
+        self._close_master_fd()
+
+    def pause(self) -> None:
+        if self.tool == "codex" and not self.resume_token:
+            self.resume_token = self._latest_codex_session_id()
+        if self._proc and self.status == "running":
+            self._exit_status = "paused"
+            self.status = "paused"
+            if self.needs_input:
+                self._schedule_input_resolved()
+            if self._request_tui_exit():
+                self._schedule_pause_fallback()
+                return
+            self._terminate_process()
+        self.status = "paused"
+        if self.needs_input:
+            self._schedule_input_resolved()
+        self._close_master_fd()
+
+    def _request_tui_exit(self) -> bool:
+        if self._master_fd is None:
+            return False
+        try:
+            os.write(self._master_fd, PAUSE_EXIT_COMMAND.encode("utf-8"))
+            return True
+        except OSError:
+            return False
+
+    def _terminate_process(self) -> None:
+        if self._proc and self._proc.poll() is None:
             try:
                 os.kill(self._proc.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            self.status = "stopped"
-            if self.needs_input:
-                self._schedule_input_resolved()
+
+    def _close_master_fd(self) -> None:
         if self._master_fd is not None:
             try:
                 os.close(self._master_fd)
@@ -270,24 +317,35 @@ class PtySession:
                 pass
             self._master_fd = None
 
-    def pause(self) -> None:
-        if self.tool == "codex" and not self.resume_token:
-            self.resume_token = self._latest_codex_session_id()
-        if self._proc and self.status == "running":
-            self._exit_status = "paused"
-            try:
-                os.kill(self._proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-        self.status = "paused"
-        if self.needs_input:
-            self._schedule_input_resolved()
-        if self._master_fd is not None:
-            try:
-                os.close(self._master_fd)
-            except OSError:
-                pass
-            self._master_fd = None
+    def _schedule_pause_fallback(self) -> None:
+        if not self._proc or self._proc.poll() is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._pause_fallback_task:
+            self._pause_fallback_task.cancel()
+        proc = self._proc
+        self._pause_fallback_task = loop.create_task(self._terminate_if_pause_hangs(proc))
+
+    async def _terminate_if_pause_hangs(self, proc: subprocess.Popen) -> None:
+        await asyncio.sleep(PAUSE_EXIT_GRACE_SECONDS)
+        if self._proc is proc and proc.poll() is None and self.status == "paused":
+            logger.warning("PTY session %s did not exit after /exit; terminating", self.id)
+            self._terminate_process()
+
+    async def _finish_pending_pause(self) -> None:
+        if not self._proc or self._proc.poll() is not None:
+            return
+        if self.status != "paused":
+            return
+        try:
+            await asyncio.wait_for(asyncio.to_thread(self._proc.wait), timeout=PAUSE_EXIT_GRACE_SECONDS)
+        except TimeoutError:
+            logger.warning("PTY session %s still running during resume; terminating before restart", self.id)
+            self._terminate_process()
+            await asyncio.to_thread(self._proc.wait)
 
     def to_info(self) -> PtySessionInfo:
         return PtySessionInfo(

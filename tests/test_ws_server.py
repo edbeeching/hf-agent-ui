@@ -177,7 +177,7 @@ async def test_stop_session_via_ws(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_remove_session_via_ws(tmp_path: Path) -> None:
     """session.remove should stop and remove the PTY session."""
-    manager = SessionManager()
+    manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
