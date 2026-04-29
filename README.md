@@ -29,6 +29,9 @@ switch update
 # Start the hub (serves the web UI on :9341)
 switch hub
 
+# Or start the hub with a local daemon for development/single-machine use
+switch hub --local-daemon
+
 # Start a daemon (on each machine)
 switch daemon --hub http://<hub-host>:9341
 
@@ -38,9 +41,9 @@ switch daemon --hub http://<hub-host>:9341
 ## CLI Reference
 
 ```
-switch hub     [-p PORT] [--host HOST] [-v]          Start the hub + web UI (default :9341)
-switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]  Start a daemon (default :9340)
-switch update                                        Update to the latest version
+switch hub     [-p PORT] [--host HOST] [--local-daemon] [-v]  Start the hub + web UI
+switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]           Start a daemon
+switch update                                                 Update to the latest version
 ```
 
 ## Development

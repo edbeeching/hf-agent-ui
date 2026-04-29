@@ -17,6 +17,9 @@ def main() -> None:
     hub_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
     hub_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     hub_p.add_argument("--dev", action="store_true", help="Dev mode: auto-reload on Python changes, use Vite for frontend")
+    hub_p.add_argument("--local-daemon", action="store_true", help="Also launch a local daemon for this hub")
+    hub_p.add_argument("--daemon-port", type=int, default=9340, help="Local daemon port with --local-daemon (default: 9340)")
+    hub_p.add_argument("--daemon-name", default="local", help="Local daemon name with --local-daemon (default: local)")
 
     # --- daemon ---
     daemon_p = sub.add_parser("daemon", help="Start a daemon on this machine")
@@ -85,6 +88,11 @@ def _display_host_for_browser(bind_host: str) -> str:
     if bind_host in {"0.0.0.0", "::"}:
         return "localhost"
     return bind_host
+
+
+def _local_hub_url(bind_host: str, port: int) -> str:
+    """Return the hub URL a daemon process on the same machine should use."""
+    return f"http://{_display_host_for_browser(bind_host)}:{port}"
 
 
 def _kill_port(port: int) -> None:
@@ -216,7 +224,12 @@ def _run_dev() -> None:
 def _run_hub(args: argparse.Namespace) -> None:
     import logging
     import os
+    import signal
+    import subprocess
+    import threading
+    import time
 
+    import httpx
     import uvicorn
 
     logging.basicConfig(
@@ -227,6 +240,9 @@ def _run_hub(args: argparse.Namespace) -> None:
 
     daemon_url = f"http://{_display_host_for_daemons(args.host)}:{args.port}"
     browser_url = f"http://{_display_host_for_browser(args.host)}:{args.port}"
+    local_hub_url = _local_hub_url(args.host, args.port)
+    local_daemon_proc: subprocess.Popen | None = None
+    local_daemon_lock = threading.Lock()
 
     print()
     print(f"  [switch hub] To connect daemons:")
@@ -241,21 +257,71 @@ def _run_hub(args: argparse.Namespace) -> None:
         print(f"  [switch hub] Open {browser_url}")
         if daemon_url != browser_url:
             print(f"  [switch hub] Network URL {daemon_url}")
+    if args.local_daemon:
+        print(f"  [switch hub] Local daemon will start on :{args.daemon_port} as '{args.daemon_name}'")
     print()
 
-    import threading
     import webbrowser
     open_url = "http://localhost:5173" if args.dev else browser_url
     threading.Timer(1.5, webbrowser.open, args=[open_url]).start()
 
-    uvicorn.run(
-        "switch.hub.app:app",
-        host=args.host,
-        port=args.port,
-        log_level="debug" if args.verbose else "info",
-        reload=args.dev,
-        reload_dirs=["switch"] if args.dev else None,
-    )
+    def start_local_daemon_when_ready() -> None:
+        nonlocal local_daemon_proc
+        for _ in range(60):
+            try:
+                httpx.get(f"{local_hub_url}/api/daemons", timeout=1)
+                break
+            except Exception:
+                time.sleep(0.5)
+        else:
+            print(f"  [switch hub] Local daemon was not started because {local_hub_url} did not become ready", file=sys.stderr)
+            return
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "switch.daemon",
+            "--port",
+            str(args.daemon_port),
+            "--hub",
+            local_hub_url,
+            "--name",
+            args.daemon_name,
+        ]
+        if args.verbose:
+            cmd.append("--verbose")
+        with local_daemon_lock:
+            local_daemon_proc = subprocess.Popen(cmd, start_new_session=True)
+        print(f"  [switch hub] Started local daemon pid={local_daemon_proc.pid}")
+
+    def stop_local_daemon() -> None:
+        with local_daemon_lock:
+            proc = local_daemon_proc
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    if args.local_daemon:
+        threading.Thread(target=start_local_daemon_when_ready, daemon=True).start()
+
+    try:
+        uvicorn.run(
+            "switch.hub.app:app",
+            host=args.host,
+            port=args.port,
+            log_level="debug" if args.verbose else "info",
+            reload=args.dev,
+            reload_dirs=["switch"] if args.dev else None,
+        )
+    finally:
+        stop_local_daemon()
 
 
 def _run_daemon(args: argparse.Namespace) -> None:
