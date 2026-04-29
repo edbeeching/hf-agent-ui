@@ -107,16 +107,13 @@
   background: #30363d;
 }
 
-/* Mode badge */
-.mode-badge {
-  font-size: 8px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-weight: 600;
-  text-transform: uppercase;
-  flex-shrink: 0;
-  background: #30363d;
-  color: #8b949e;
+.session-action {
+  opacity: 0;
+}
+
+.session-item:hover .session-action,
+.session-item.selected .session-action {
+  opacity: 1;
 }
 
 /* Terminal container */
@@ -170,6 +167,10 @@
 
 .status-dot.starting {
   background: #d29922;
+}
+
+.status-dot.paused {
+  background: #8b949e;
 }
 
 .status-dot.error {

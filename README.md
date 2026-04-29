@@ -29,6 +29,9 @@ switch update
 # Start the hub (serves the web UI on :9341)
 switch hub
 
+# Or start the hub with a local daemon for development/single-machine use
+switch hub --local-daemon
+
 # Start a daemon (on each machine)
 switch daemon --hub http://<hub-host>:9341
 
@@ -38,9 +41,9 @@ switch daemon --hub http://<hub-host>:9341
 ## CLI Reference
 
 ```
-switch hub     [-p PORT] [--host HOST] [-v]          Start the hub + web UI (default :9341)
-switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]  Start a daemon (default :9340)
-switch update                                        Update to the latest version
+switch hub     [-p PORT] [--host HOST] [--local-daemon] [-v]  Start the hub + web UI
+switch daemon  [-p PORT] [--hub URL] [-n NAME] [-v]           Start a daemon
+switch update                                                 Update to the latest version
 ```
 
 ## Development
@@ -57,6 +60,17 @@ This links the `switch` command to your local checkout — Python changes take e
 cd switch/web && npm install && npm run build
 cp -r dist/* ../hub/static/
 ```
+
+### Worktrees
+
+Keep local worktrees inside the repo under `.worktrees/` so sandboxed coding agents can read and write them without needing permissions for sibling directories:
+
+```bash
+mkdir -p .worktrees
+git worktree add .worktrees/<name> -b <branch> origin/main
+```
+
+The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to the repo, such as `../switch-main`, because those paths may sit outside an agent's writable workspace root.
 
 ## Supported Tools
 

@@ -18,6 +18,8 @@ def main() -> None:
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
+            if line == "/exit":
+                return
             if line == "__permission_prompt__":
                 sys.stdout.write("Claude needs your permission to use Bash\n")
                 sys.stdout.flush()

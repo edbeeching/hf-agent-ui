@@ -105,6 +105,9 @@ switch dev
 switch hub --dev    # Python auto-reload via uvicorn
 cd switch/web && npm run dev   # Frontend hot reload via Vite
 switch daemon
+
+# Or run the hub with a local daemon attached:
+switch hub --local-daemon
 ```
 
 - Edit Python files → hub auto-restarts

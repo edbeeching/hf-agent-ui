@@ -75,6 +75,10 @@ function App() {
               setSelected(null)
             }
           }}
+          onPauseSession={(daemonId, sessionId) => sw.pauseSession(daemonId, sessionId)}
+          onResumeSession={(daemonId, sessionId) => sw.resumeSession(daemonId, sessionId)}
+          onPauseDaemon={daemonId => sw.pauseDaemon(daemonId)}
+          onResumeDaemon={daemonId => sw.resumeDaemon(daemonId)}
         />
       </aside>
 

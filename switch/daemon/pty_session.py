@@ -27,9 +27,11 @@ from typing import Any, Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
-type EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
+EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 MAX_OUTPUT_BUFFER_BYTES = 1_000_000
+PAUSE_EXIT_COMMAND = "/exit\r"
+PAUSE_EXIT_GRACE_SECONDS = 5.0
 
 TOOL_COMMANDS: dict[str, list[str]] = {
     "claude": ["claude"],
@@ -58,24 +60,31 @@ class PtySession:
         tool: str = "claude",
         cols: int = 120,
         rows: int = 40,
+        session_id: str | None = None,
+        created_at: str | None = None,
+        status: str = "starting",
+        resume_token: str | None = None,
     ) -> None:
-        self.id = str(uuid.uuid4())
-        self.work_dir = os.path.expanduser(work_dir)
+        self.id = session_id or str(uuid.uuid4())
+        self.work_dir = str(Path(os.path.expanduser(work_dir)).resolve())
         self.tool = tool
         self.cols = cols
         self.rows = rows
-        self.status = "starting"
-        self.created_at = datetime.now(timezone.utc).isoformat()
+        self.status = status
+        self.created_at = created_at or datetime.now(timezone.utc).isoformat()
+        self.resume_token = resume_token
         self.needs_input = False
         self.needs_input_reason: str | None = None
         self._master_fd: int | None = None
         self._proc: subprocess.Popen | None = None
         self._read_task: asyncio.Task | None = None
         self._hook_task: asyncio.Task | None = None
+        self._pause_fallback_task: asyncio.Task | None = None
         self._callbacks: list[EventCallback] = []
         self._recent_output = ""
         self._output_buffer: list[str] = []
         self._output_buffer_bytes = 0
+        self._exit_status = "stopped"
 
     def on_event(self, cb: EventCallback) -> None:
         self._callbacks.append(cb)
@@ -91,6 +100,15 @@ class PtySession:
                 logger.exception("Error in PTY session event callback")
 
     async def start(self) -> None:
+        await self._spawn(resume=False)
+
+    async def resume(self) -> None:
+        if self.status == "running":
+            return
+        await self._finish_pending_pause()
+        await self._spawn(resume=True)
+
+    async def _spawn(self, *, resume: bool) -> None:
         cmd = TOOL_COMMANDS.get(self.tool)
         if not cmd:
             raise ValueError(f"Unknown tool: {self.tool}. Available: {list(TOOL_COMMANDS.keys())}")
@@ -104,9 +122,10 @@ class PtySession:
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
         hook_file = self._prepare_claude_notification_hook(env) if self.tool == "claude" else None
+        args = self._build_args(cmd, resume=resume)
 
         self._proc = subprocess.Popen(
-            cmd,
+            args,
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
@@ -122,12 +141,33 @@ class PtySession:
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
         self.status = "running"
+        if self._pause_fallback_task:
+            self._pause_fallback_task.cancel()
+            self._pause_fallback_task = None
         logger.info("PTY session %s started (pid=%d, tool=%s)", self.id, self._proc.pid, self.tool)
         await self._emit({"type": "pty.started", "sessionId": self.id})
 
         if hook_file:
             self._hook_task = asyncio.create_task(self._watch_claude_notifications(hook_file))
         self._read_task = asyncio.create_task(self._read_loop())
+
+    def _build_args(self, cmd: list[str], *, resume: bool) -> list[str]:
+        args = list(cmd)
+        if self.tool == "claude":
+            if resume and self.resume_token:
+                args.extend(["--resume", self.resume_token])
+            elif not resume:
+                self.resume_token = self.resume_token or str(uuid.uuid4())
+                args.extend(["--session-id", self.resume_token])
+        elif self.tool == "codex":
+            args.extend(["--cd", self.work_dir])
+            if resume:
+                args.append("resume")
+                if self.resume_token:
+                    args.append(self.resume_token)
+                else:
+                    args.append("--last")
+        return args
 
     async def _read_loop(self) -> None:
         assert self._master_fd is not None
@@ -156,17 +196,47 @@ class PtySession:
         finally:
             if self._hook_task:
                 self._hook_task.cancel()
+            if self.tool == "codex" and not self.resume_token:
+                self.resume_token = self._latest_codex_session_id()
             code = self._proc.returncode if self._proc else -1
             if self._proc and code is None:
                 code = self._proc.wait()
-            self.status = "stopped"
+            self.status = self._exit_status
+            self._exit_status = "stopped"
+            self._close_master_fd()
+            if self._pause_fallback_task:
+                self._pause_fallback_task.cancel()
+                self._pause_fallback_task = None
             logger.info("PTY process exited with code %s", code)
             await self._mark_input_resolved()
             await self._emit({
                 "type": "pty.exit",
                 "sessionId": self.id,
                 "code": code,
+                "status": self.status,
             })
+
+    def _latest_codex_session_id(self) -> str | None:
+        sessions_dir = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser() / "sessions"
+        matches: list[tuple[float, str]] = []
+        for path in sessions_dir.glob("**/*.jsonl"):
+            try:
+                with path.open("r", encoding="utf-8") as fh:
+                    line = fh.readline()
+                record = json.loads(line)
+                if record.get("type") != "session_meta":
+                    continue
+                payload = record.get("payload") or {}
+                if Path(payload.get("cwd", "")).resolve() != Path(self.work_dir).resolve():
+                    continue
+                session_id = payload.get("id")
+                if isinstance(session_id, str):
+                    matches.append((path.stat().st_mtime, session_id))
+            except (OSError, json.JSONDecodeError, RuntimeError):
+                continue
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item[0])[1]
 
     def _blocking_read(self) -> bytes:
         """Blocking read with select timeout. Runs in thread executor."""
@@ -195,20 +265,87 @@ class PtySession:
             fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
 
     def stop(self) -> None:
+        if self._pause_fallback_task:
+            self._pause_fallback_task.cancel()
+            self._pause_fallback_task = None
+        if self._proc and self._proc.poll() is None:
+            self._exit_status = "stopped"
+            self._terminate_process()
+            self.status = "stopped"
+            if self.needs_input:
+                self._schedule_input_resolved()
+        self._close_master_fd()
+
+    def pause(self) -> None:
+        if self.tool == "codex" and not self.resume_token:
+            self.resume_token = self._latest_codex_session_id()
         if self._proc and self.status == "running":
+            self._exit_status = "paused"
+            self.status = "paused"
+            if self.needs_input:
+                self._schedule_input_resolved()
+            if self._request_tui_exit():
+                self._schedule_pause_fallback()
+                return
+            self._terminate_process()
+        self.status = "paused"
+        if self.needs_input:
+            self._schedule_input_resolved()
+        self._close_master_fd()
+
+    def _request_tui_exit(self) -> bool:
+        if self._master_fd is None:
+            return False
+        try:
+            os.write(self._master_fd, PAUSE_EXIT_COMMAND.encode("utf-8"))
+            return True
+        except OSError:
+            return False
+
+    def _terminate_process(self) -> None:
+        if self._proc and self._proc.poll() is None:
             try:
                 os.kill(self._proc.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-            self.status = "stopped"
-            if self.needs_input:
-                self._schedule_input_resolved()
+
+    def _close_master_fd(self) -> None:
         if self._master_fd is not None:
             try:
                 os.close(self._master_fd)
             except OSError:
                 pass
             self._master_fd = None
+
+    def _schedule_pause_fallback(self) -> None:
+        if not self._proc or self._proc.poll() is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._pause_fallback_task:
+            self._pause_fallback_task.cancel()
+        proc = self._proc
+        self._pause_fallback_task = loop.create_task(self._terminate_if_pause_hangs(proc))
+
+    async def _terminate_if_pause_hangs(self, proc: subprocess.Popen) -> None:
+        await asyncio.sleep(PAUSE_EXIT_GRACE_SECONDS)
+        if self._proc is proc and proc.poll() is None and self.status == "paused":
+            logger.warning("PTY session %s did not exit after /exit; terminating", self.id)
+            self._terminate_process()
+
+    async def _finish_pending_pause(self) -> None:
+        if not self._proc or self._proc.poll() is not None:
+            return
+        if self.status != "paused":
+            return
+        try:
+            await asyncio.wait_for(asyncio.to_thread(self._proc.wait), timeout=PAUSE_EXIT_GRACE_SECONDS)
+        except TimeoutError:
+            logger.warning("PTY session %s still running during resume; terminating before restart", self.id)
+            self._terminate_process()
+            await asyncio.to_thread(self._proc.wait)
 
     def to_info(self) -> PtySessionInfo:
         return PtySessionInfo(
@@ -224,6 +361,19 @@ class PtySession:
 
     def get_output_buffer(self) -> list[str]:
         return list(self._output_buffer)
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "kind": "pty",
+            "id": self.id,
+            "status": self.status,
+            "created_at": self.created_at,
+            "work_dir": self.work_dir,
+            "tool": self.tool,
+            "cols": self.cols,
+            "rows": self.rows,
+            "resume_token": self.resume_token,
+        }
 
     def _append_output(self, text: str) -> None:
         size = len(text.encode("utf-8", errors="replace"))
