@@ -2,6 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 type JsonObject = Record<string, unknown>
 
+export type LaunchMode = 'local' | 'custom'
+
+export interface LaunchOptions {
+  launchMode: LaunchMode
+  launchCommand?: string
+  launchLabel?: string
+}
+
 export interface Daemon {
   id: string
   name: string
@@ -20,6 +28,9 @@ export interface SessionInfo {
   created_at: string
   needs_input: boolean
   needs_input_reason: string | null
+  launch_mode: LaunchMode
+  launch_command: string | null
+  launch_label: string | null
 }
 
 interface SwitchState {
@@ -268,10 +279,21 @@ export function useSwitch() {
     daemonId: string,
     workDir: string,
     tool: string = 'claude',
+    launch: LaunchOptions = { launchMode: 'local' },
     cols: number = 120,
     rows: number = 40,
   ) => {
-    send({ type: 'pty.create', daemonId, workDir, tool, cols, rows })
+    send({
+      type: 'pty.create',
+      daemonId,
+      workDir,
+      tool,
+      cols,
+      rows,
+      launchMode: launch.launchMode,
+      launchCommand: launch.launchCommand,
+      launchLabel: launch.launchLabel,
+    })
   }, [send])
 
   const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string) => {
@@ -349,6 +371,9 @@ function normalizeSession(session: SessionInfo): SessionInfo {
     mode: 'pty',
     needs_input: Boolean(session.needs_input),
     needs_input_reason: session.needs_input_reason || null,
+    launch_mode: session.launch_mode === 'custom' ? 'custom' : 'local',
+    launch_command: typeof session.launch_command === 'string' ? session.launch_command : null,
+    launch_label: typeof session.launch_label === 'string' ? session.launch_label : null,
   }
 }
 

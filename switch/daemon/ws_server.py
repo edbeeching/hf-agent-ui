@@ -21,7 +21,7 @@ class DaemonWsServer:
     Protocol (client = hub, server = daemon):
 
     Client -> Server:
-      { type: "pty.create", workDir, tool?, cols?, rows? }
+      { type: "pty.create", workDir, tool?, cols?, rows?, launchMode?, launchCommand?, launchLabel? }
       { type: "pty.input", sessionId, data }
       { type: "pty.resize", sessionId, cols, rows }
       { type: "session.stop", sessionId }
@@ -88,15 +88,33 @@ class DaemonWsServer:
                 work_dir = req.get("workDir", ".")
                 cols = req.get("cols", 120)
                 rows = req.get("rows", 40)
-                session = self.manager.create_pty(work_dir, tool, cols, rows)
-                self._subscribe_any(ws, session)
-                await session.start()
-                await self._send(ws, {
-                    "type": "pty.created",
-                    "session": json.loads(
-                        json.dumps(session.to_info().__dict__, default=str)
-                    ),
-                })
+                session: PtySession | None = None
+                try:
+                    session = self.manager.create_pty(
+                        work_dir,
+                        tool,
+                        cols,
+                        rows,
+                        launch_mode=req.get("launchMode", "local"),
+                        launch_command=req.get("launchCommand"),
+                        launch_label=req.get("launchLabel"),
+                    )
+                    self._subscribe_any(ws, session)
+                    await session.start()
+                    await self._send(ws, {
+                        "type": "pty.created",
+                        "session": json.loads(
+                            json.dumps(session.to_info().__dict__, default=str)
+                        ),
+                    })
+                except Exception as exc:
+                    if session:
+                        self.manager.remove(session.id)
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": str(exc),
+                        "requestType": msg_type,
+                    })
 
             case "pty.input":
                 session = self.manager.get(req.get("sessionId", ""))

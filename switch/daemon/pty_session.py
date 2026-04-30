@@ -32,6 +32,7 @@ EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 MAX_OUTPUT_BUFFER_BYTES = 1_000_000
 PAUSE_EXIT_COMMAND = "/exit\r"
 PAUSE_EXIT_GRACE_SECONDS = 5.0
+CUSTOM_LAUNCH_SHELL_ENV = "SWITCH_CUSTOM_LAUNCH_SHELL"
 
 TOOL_COMMANDS: dict[str, list[str]] = {
     "claude": ["claude"],
@@ -49,6 +50,9 @@ class PtySessionInfo:
     created_at: str
     needs_input: bool
     needs_input_reason: str | None
+    launch_mode: str
+    launch_command: str | None
+    launch_label: str | None
 
 
 class PtySession:
@@ -64,6 +68,9 @@ class PtySession:
         created_at: str | None = None,
         status: str = "starting",
         resume_token: str | None = None,
+        launch_mode: str = "local",
+        launch_command: str | None = None,
+        launch_label: str | None = None,
     ) -> None:
         self.id = session_id or str(uuid.uuid4())
         self.work_dir = str(Path(os.path.expanduser(work_dir)).resolve())
@@ -73,6 +80,9 @@ class PtySession:
         self.status = status
         self.created_at = created_at or datetime.now(timezone.utc).isoformat()
         self.resume_token = resume_token
+        self.launch_mode = _normalize_launch_mode(launch_mode)
+        self.launch_command = _normalize_launch_command(self.launch_mode, launch_command)
+        self.launch_label = _normalize_launch_label(self.launch_mode, launch_label)
         self.needs_input = False
         self.needs_input_reason: str | None = None
         self._master_fd: int | None = None
@@ -152,6 +162,12 @@ class PtySession:
         self._read_task = asyncio.create_task(self._read_loop())
 
     def _build_args(self, cmd: list[str], *, resume: bool) -> list[str]:
+        args = self._build_tool_args(cmd, resume=resume)
+        if self.launch_mode == "custom":
+            return [os.environ.get(CUSTOM_LAUNCH_SHELL_ENV, "/bin/sh"), "-lc", self._render_launch_command(args)]
+        return args
+
+    def _build_tool_args(self, cmd: list[str], *, resume: bool) -> list[str]:
         args = list(cmd)
         if self.tool == "claude":
             if resume and self.resume_token:
@@ -168,6 +184,15 @@ class PtySession:
                 else:
                     args.append("--last")
         return args
+
+    def _render_launch_command(self, tool_args: list[str]) -> str:
+        if not self.launch_command or "{command}" not in self.launch_command:
+            raise ValueError("Custom launch command must include {command}")
+        return (
+            self.launch_command
+            .replace("{command}", shlex.join(tool_args))
+            .replace("{workDir}", shlex.quote(self.work_dir))
+        )
 
     async def _read_loop(self) -> None:
         assert self._master_fd is not None
@@ -305,9 +330,12 @@ class PtySession:
     def _terminate_process(self) -> None:
         if self._proc and self._proc.poll() is None:
             try:
-                os.kill(self._proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+                os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                try:
+                    os.kill(self._proc.pid, signal.SIGTERM)
+                except (ProcessLookupError, OSError):
+                    pass
 
     def _close_master_fd(self) -> None:
         if self._master_fd is not None:
@@ -357,6 +385,9 @@ class PtySession:
             created_at=self.created_at,
             needs_input=self.needs_input,
             needs_input_reason=self.needs_input_reason,
+            launch_mode=self.launch_mode,
+            launch_command=self.launch_command,
+            launch_label=self.launch_label,
         )
 
     def get_output_buffer(self) -> list[str]:
@@ -373,6 +404,9 @@ class PtySession:
             "cols": self.cols,
             "rows": self.rows,
             "resume_token": self.resume_token,
+            "launch_mode": self.launch_mode,
+            "launch_command": self.launch_command,
+            "launch_label": self.launch_label,
         }
 
     def _append_output(self, text: str) -> None:
@@ -567,3 +601,27 @@ def _detect_action_required(output: str, tool: str) -> str | None:
         if re.search(pattern, text):
             return reason
     return None
+
+
+def _normalize_launch_mode(value: object) -> str:
+    if value is None:
+        return "local"
+    if value not in {"local", "custom"}:
+        raise ValueError(f"Unknown launch mode: {value}")
+    return str(value)
+
+
+def _normalize_launch_command(launch_mode: str, value: object) -> str | None:
+    if launch_mode != "custom":
+        return None
+    command = value.strip() if isinstance(value, str) else ""
+    if "{command}" not in command:
+        raise ValueError("Custom launch command must include {command}")
+    return command
+
+
+def _normalize_launch_label(launch_mode: str, value: object) -> str | None:
+    if launch_mode != "custom":
+        return None
+    label = value.strip() if isinstance(value, str) else ""
+    return label or "custom"

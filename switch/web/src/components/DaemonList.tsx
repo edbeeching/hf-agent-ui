@@ -190,6 +190,11 @@ function ProjectSection({
           <span className={`status-dot ${session.status}`} />
           {session.needs_input && <span className="input-required-badge">!</span>}
           <span className={`tool-badge ${session.tool || 'claude'}`}>{session.tool || 'claude'}</span>
+          {session.launch_mode === 'custom' && (
+            <span className="launch-badge" title={session.launch_command || 'Custom launch'}>
+              {session.launch_label || 'custom'}
+            </span>
+          )}
           <span className="session-dir">{session.work_dir}</span>
           {project.daemons.size > 1 && (
             <span className="session-daemon" title={daemon.hostname || daemon.host}>{daemon.name}</span>

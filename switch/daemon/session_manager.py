@@ -18,12 +18,29 @@ class SessionManager:
         self.state_path = state_path or Path.home() / ".switch" / "sessions.json"
         self._load()
 
-    def create_pty(self, work_dir: str, tool: str = "claude", cols: int = 120, rows: int = 40) -> PtySession:
+    def create_pty(
+        self,
+        work_dir: str,
+        tool: str = "claude",
+        cols: int = 120,
+        rows: int = 40,
+        launch_mode: str = "local",
+        launch_command: str | None = None,
+        launch_label: str | None = None,
+    ) -> PtySession:
         """Create a PTY session. Call session.start() after subscribing."""
-        session = PtySession(work_dir=work_dir, tool=tool, cols=cols, rows=rows)
+        session = PtySession(
+            work_dir=work_dir,
+            tool=tool,
+            cols=cols,
+            rows=rows,
+            launch_mode=launch_mode,
+            launch_command=launch_command,
+            launch_label=launch_label,
+        )
         session.on_event(self._persist_on_event)
         self._sessions[session.id] = session
-        logger.info("Created PTY session %s (%s) in %s", session.id, tool, work_dir)
+        logger.info("Created PTY session %s (%s) in %s via %s", session.id, tool, work_dir, launch_mode)
         self._save()
         return session
 
@@ -120,6 +137,9 @@ class SessionManager:
                     created_at=record.get("created_at"),
                     status=self._restore_status(record.get("status")),
                     resume_token=record.get("resume_token"),
+                    launch_mode=record.get("launch_mode", "local"),
+                    launch_command=record.get("launch_command"),
+                    launch_label=record.get("launch_label"),
                 )
                 session.on_event(self._persist_on_event)
                 self._sessions[session.id] = session

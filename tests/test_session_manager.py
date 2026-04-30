@@ -48,3 +48,28 @@ def test_session_manager_preserves_stopped_pty_status(tmp_path: Path) -> None:
     manager = SessionManager(state_path)
 
     assert manager.list()[0]["status"] == "stopped"
+
+
+def test_session_manager_persists_custom_launch_metadata(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    session = manager.create_pty(
+        str(tmp_path),
+        tool="claude",
+        launch_mode="custom",
+        launch_command="srun --pty --chdir {workDir} {command}",
+        launch_label="gpu",
+    )
+
+    info = session.to_info()
+    assert info.launch_mode == "custom"
+    assert info.launch_command == "srun --pty --chdir {workDir} {command}"
+    assert info.launch_label == "gpu"
+
+    restored = SessionManager(state_path)
+
+    restored_info = restored.list()[0]
+    assert restored_info["launch_mode"] == "custom"
+    assert restored_info["launch_command"] == "srun --pty --chdir {workDir} {command}"
+    assert restored_info["launch_label"] == "gpu"

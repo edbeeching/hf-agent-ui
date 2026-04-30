@@ -175,6 +175,20 @@
   color: #1a1a1a;
 }
 
+.launch-badge {
+  max-width: 58px;
+  overflow: hidden;
+  padding: 1px 5px;
+  border: 1px solid #30363d;
+  border-radius: 3px;
+  color: #c9d1d9;
+  font-size: 9px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* Status dots */
 .status-dot {
   width: 8px;
@@ -394,6 +408,12 @@
 
 .recent-dir-select {
   margin-bottom: 8px;
+}
+
+.dialog-error {
+  margin-top: 4px;
+  color: #ff7b72;
+  font-size: 12px;
 }
 
 .dialog-actions {
