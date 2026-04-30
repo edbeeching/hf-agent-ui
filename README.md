@@ -80,6 +80,14 @@ export SWITCH_DAEMON_TOKEN=<shared-secret>
 switch daemon --hub https://<space-subdomain>.hf.space
 ```
 
+### Space Deploys
+
+The GitHub workflow `Deploy HF Space` uploads `main` to the private Space after CI passes. Configure a GitHub Actions repository secret with write access to the Space:
+
+```bash
+HF_TOKEN=<hf-write-token>
+```
+
 ## CLI Reference
 
 ```
