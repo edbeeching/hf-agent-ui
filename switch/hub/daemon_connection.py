@@ -63,12 +63,14 @@ class DaemonConnectionPool:
             register_payload = json.loads(register_msg)
             if not isinstance(register_payload, dict):
                 raise ValueError("daemon.register payload must be an object")
-            daemon = self._register(register_payload)
-            old = self._connections.get(daemon.id)
+            name = self._daemon_name(register_payload)
+            duplicate = self._connected_daemon_by_name(name)
+            if duplicate:
+                await _send_error(ws, f"Daemon name already connected: {name}")
+                return
+            daemon = self._register(register_payload, name)
             conn = DaemonConnection(daemon, ws, self._on_message)
             self._connections[daemon.id] = conn
-            if old:
-                await old.close()
             await conn.send({
                 "type": "daemon.registered",
                 "daemonId": daemon.id,
@@ -100,16 +102,26 @@ class DaemonConnectionPool:
             await conn.close()
         self._connections.clear()
 
-    def _register(self, msg: dict[str, Any]) -> DaemonInfo:
+    def _connected_daemon_by_name(self, name: str) -> DaemonConnection | None:
+        for conn in self._connections.values():
+            if conn.daemon.name == name:
+                return conn
+        return None
+
+    @staticmethod
+    def _daemon_name(msg: dict[str, Any]) -> str:
         if msg.get("type") != "daemon.register":
             raise ValueError("First daemon message must be daemon.register")
         name = msg.get("name")
         if not isinstance(name, str) or not name.strip():
             raise ValueError("daemon.register requires a non-empty name")
+        return name.strip()
+
+    def _register(self, msg: dict[str, Any], name: str) -> DaemonInfo:
         hostname = msg.get("hostname")
         if not isinstance(hostname, str):
             hostname = ""
-        return self.registry.register(name.strip(), "outbound", 0, hostname)
+        return self.registry.register(name, "outbound", 0, hostname)
 
 
 def _is_authorized(ws: WebSocket, expected_token: str | None) -> bool:

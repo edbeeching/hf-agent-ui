@@ -179,3 +179,15 @@ def test_hf_token_uses_explicit_value(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-env")
 
     assert cli._hf_token(argparse.Namespace(hf_token="hf-explicit")) == "hf-explicit"
+
+
+def test_daemon_name_defaults_to_hostname(monkeypatch) -> None:
+    monkeypatch.setattr("platform.node", lambda: "devbox")
+
+    assert cli._daemon_name(argparse.Namespace(name=None, port=9340)) == "devbox"
+
+
+def test_daemon_name_uses_explicit_value(monkeypatch) -> None:
+    monkeypatch.setattr("platform.node", lambda: "devbox")
+
+    assert cli._daemon_name(argparse.Namespace(name="custom", port=9340)) == "custom"

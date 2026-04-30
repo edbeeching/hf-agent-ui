@@ -27,7 +27,7 @@ def main() -> None:
     daemon_p.add_argument("--hub", default="http://localhost:9341", help="Hub URL (default: http://localhost:9341)")
     daemon_p.add_argument("--token", default=None, help="Daemon auth token (env: SWITCH_DAEMON_TOKEN)")
     daemon_p.add_argument("--hf-token", default=None, help="Hugging Face token for private Spaces (env: HF_TOKEN)")
-    daemon_p.add_argument("-n", "--name", default=None, help="Display name (default: daemon-<port>)")
+    daemon_p.add_argument("-n", "--name", default=None, help="Display name (default: hostname)")
     daemon_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
 
     # --- dev ---
@@ -107,6 +107,12 @@ def _hf_token(args: argparse.Namespace) -> str | None:
     import os
 
     return getattr(args, "hf_token", None) or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+
+def _daemon_name(args: argparse.Namespace) -> str:
+    import platform
+
+    return getattr(args, "name", None) or platform.node() or f"daemon-{getattr(args, 'port', 9340)}"
 
 
 def _kill_port(port: int) -> None:
@@ -348,7 +354,7 @@ def _run_daemon(args: argparse.Namespace) -> None:
     from switch.daemon.hub_client import HubDaemonClient
     from switch.daemon.session_manager import SessionManager
 
-    name = args.name or f"daemon-{args.port}"
+    name = _daemon_name(args)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

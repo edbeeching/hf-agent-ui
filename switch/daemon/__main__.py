@@ -4,10 +4,15 @@ import argparse
 import asyncio
 import logging
 import os
+import platform
 import signal
 
 from .hub_client import HubDaemonClient
 from .session_manager import SessionManager
+
+
+def default_daemon_name(args: argparse.Namespace) -> str:
+    return args.name or platform.node() or f"daemon-{args.port}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-n", "--name",
         default=os.environ.get("SWITCH_DAEMON_NAME"),
-        help="Daemon display name (default: daemon-<port>, env: SWITCH_DAEMON_NAME)",
+        help="Daemon display name (default: hostname, env: SWITCH_DAEMON_NAME)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -50,7 +55,7 @@ def parse_args() -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace) -> None:
-    name = args.name or f"daemon-{args.port}"
+    name = default_daemon_name(args)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
