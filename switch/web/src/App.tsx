@@ -99,9 +99,9 @@ function App() {
           daemon={newSessionDaemon}
           recentWorkDirs={recentWorkDirs}
           onClose={() => setNewSessionDaemonId(null)}
-          onCreate={(daemonId, workDir, tool) => {
+          onCreate={(daemonId, workDir, tool, launch) => {
             setRecentWorkDirs(updateRecentWorkDirs(workDir))
-            createPtySession(daemonId, workDir, tool)
+            createPtySession(daemonId, workDir, tool, launch)
           }}
         />
       )}
