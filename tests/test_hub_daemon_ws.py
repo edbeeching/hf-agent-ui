@@ -64,3 +64,35 @@ def test_daemon_ws_allows_query_token(monkeypatch) -> None:
                 "hostname": "devbox",
             })
             assert daemon_ws.receive_json()["type"] == "daemon.registered"
+
+
+def test_daemon_ws_rejects_duplicate_active_name(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/daemon/ws?token=secret") as first_ws:
+            first_ws.send_json({
+                "type": "daemon.register",
+                "name": "remote",
+                "hostname": "devbox-1",
+            })
+            first = first_ws.receive_json()
+            assert first["type"] == "daemon.registered"
+
+            with client.websocket_connect("/daemon/ws?token=secret") as second_ws:
+                second_ws.send_json({
+                    "type": "daemon.register",
+                    "name": "remote",
+                    "hostname": "devbox-2",
+                })
+                rejected = second_ws.receive_json()
+                assert rejected == {
+                    "type": "error",
+                    "message": "Daemon name already connected: remote",
+                }
+
+            daemons = client.get("/api/daemons").json()
+            assert len(daemons) == 1
+            assert daemons[0]["id"] == first["daemonId"]
+            assert daemons[0]["hostname"] == "devbox-1"
+            assert daemons[0]["connected"] is True
