@@ -1,11 +1,34 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/hub")
+async def hub_info(request: Request) -> dict[str, Any]:
+    daemon_hub_url = os.environ.get("SWITCH_HUB_DAEMON_URL")
+    daemon_token = os.environ.get("SWITCH_DAEMON_TOKEN")
+    if not daemon_hub_url:
+        forwarded_proto = request.headers.get("x-forwarded-proto")
+        forwarded_host = request.headers.get("x-forwarded-host")
+        if forwarded_proto and forwarded_host:
+            daemon_hub_url = f"{forwarded_proto}://{forwarded_host}"
+        else:
+            daemon_hub_url = str(request.base_url).rstrip("/")
+        if daemon_hub_url.startswith("http://") and request.headers.get("host", "").endswith(".hf.space"):
+            daemon_hub_url = daemon_hub_url.replace("http://", "https://", 1)
+    payload: dict[str, Any] = {
+        "daemonHubUrl": daemon_hub_url,
+        "daemonTokenRequired": bool(daemon_token),
+    }
+    if daemon_token and os.environ.get("SWITCH_EXPOSE_DAEMON_TOKEN") == "1":
+        payload["daemonToken"] = daemon_token
+    return payload
 
 
 class RegisterRequest(BaseModel):
@@ -17,11 +40,10 @@ class RegisterRequest(BaseModel):
 
 @router.post("/daemons/register")
 async def register_daemon(req: RegisterRequest, request: Request) -> dict[str, Any]:
-    registry = request.app.state.registry
-    pool = request.app.state.pool
-    info = registry.register(req.name, req.host, req.port, req.hostname)
-    await pool.connect(info)
-    return {"id": info.id, "name": info.name}
+    raise HTTPException(
+        status_code=410,
+        detail="HTTP daemon registration is no longer supported; use /daemon/ws",
+    )
 
 
 @router.post("/daemons/{daemon_id}/heartbeat")

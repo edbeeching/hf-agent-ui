@@ -23,8 +23,10 @@ def main() -> None:
 
     # --- daemon ---
     daemon_p = sub.add_parser("daemon", help="Start a daemon on this machine")
-    daemon_p.add_argument("-p", "--port", type=int, default=9340, help="Port (default: 9340)")
+    daemon_p.add_argument("-p", "--port", type=int, default=9340, help="Deprecated; ignored in outbound mode")
     daemon_p.add_argument("--hub", default="http://localhost:9341", help="Hub URL (default: http://localhost:9341)")
+    daemon_p.add_argument("--token", default=None, help="Daemon auth token (env: SWITCH_DAEMON_TOKEN)")
+    daemon_p.add_argument("--hf-token", default=None, help="Hugging Face token for private Spaces (env: HF_TOKEN)")
     daemon_p.add_argument("-n", "--name", default=None, help="Display name (default: daemon-<port>)")
     daemon_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
 
@@ -95,6 +97,18 @@ def _local_hub_url(bind_host: str, port: int) -> str:
     return f"http://{_display_host_for_browser(bind_host)}:{port}"
 
 
+def _daemon_token(args: argparse.Namespace) -> str | None:
+    import os
+
+    return getattr(args, "token", None) or os.environ.get("SWITCH_DAEMON_TOKEN")
+
+
+def _hf_token(args: argparse.Namespace) -> str | None:
+    import os
+
+    return getattr(args, "hf_token", None) or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+
+
 def _kill_port(port: int) -> None:
     """Kill any process listening on the given port."""
     import os
@@ -142,6 +156,7 @@ def _run_dev() -> None:
     from pathlib import Path
 
     os.environ["SWITCH_DEV"] = "1"
+    os.environ["SWITCH_HUB_DAEMON_URL"] = "http://localhost:9341"
     web_dir = Path(__file__).parent.parent / "web"
 
     if not (web_dir / "package.json").exists():
@@ -241,6 +256,7 @@ def _run_hub(args: argparse.Namespace) -> None:
     daemon_url = f"http://{_display_host_for_daemons(args.host)}:{args.port}"
     browser_url = f"http://{_display_host_for_browser(args.host)}:{args.port}"
     local_hub_url = _local_hub_url(args.host, args.port)
+    os.environ["SWITCH_HUB_DAEMON_URL"] = daemon_url
     local_daemon_proc: subprocess.Popen | None = None
     local_daemon_lock = threading.Lock()
 
@@ -329,9 +345,8 @@ def _run_daemon(args: argparse.Namespace) -> None:
     import logging
     import signal
 
-    from switch.daemon.registration import HubRegistration
+    from switch.daemon.hub_client import HubDaemonClient
     from switch.daemon.session_manager import SessionManager
-    from switch.daemon.ws_server import DaemonWsServer
 
     name = args.name or f"daemon-{args.port}"
 
@@ -344,14 +359,10 @@ def _run_daemon(args: argparse.Namespace) -> None:
 
     async def run() -> None:
         manager = SessionManager()
-        ws_server = DaemonWsServer(manager, args.port)
-        registration = HubRegistration(args.hub, name, args.port)
+        client = HubDaemonClient(manager, args.hub, name, token=_daemon_token(args), hf_token=_hf_token(args))
+        client_task = asyncio.create_task(client.run_forever())
 
-        await ws_server.start()
-        await registration.register()
-        await registration.start_heartbeat()
-
-        logger.info("Ready — listening on :%d, registered with hub at %s", args.port, args.hub)
+        logger.info("Ready — connecting outbound to hub at %s", args.hub)
 
         stop_event = asyncio.Event()
 
@@ -365,8 +376,12 @@ def _run_daemon(args: argparse.Namespace) -> None:
 
         await stop_event.wait()
 
+        client.stop()
+        client_task.cancel()
+        try:
+            await client_task
+        except asyncio.CancelledError:
+            pass
         manager.stop_all()
-        await ws_server.stop()
-        await registration.stop()
 
     asyncio.run(run())

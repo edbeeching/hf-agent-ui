@@ -77,9 +77,8 @@ function App() {
           }}
           onPauseSession={(daemonId, sessionId) => sw.pauseSession(daemonId, sessionId)}
           onResumeSession={(daemonId, sessionId) => sw.resumeSession(daemonId, sessionId)}
-          onPauseDaemon={daemonId => sw.pauseDaemon(daemonId)}
-          onResumeDaemon={daemonId => sw.resumeDaemon(daemonId)}
         />
+        <ConnectDaemonPanel />
       </aside>
 
       <main className="main-panel">
@@ -111,6 +110,114 @@ function App() {
 }
 
 export default App
+
+function ConnectDaemonPanel() {
+  const [copied, setCopied] = useState<string | null>(null)
+  const [daemonHubUrl, setDaemonHubUrl] = useState(window.location.origin)
+  const [daemonTokenRequired, setDaemonTokenRequired] = useState(false)
+  const [daemonToken, setDaemonToken] = useState<string | null>(null)
+  const installCommand = 'uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/switch.git'
+  const daemonCommand = daemonLaunchCommand(daemonHubUrl, daemonTokenRequired, daemonToken)
+
+  useEffect(() => {
+    let disposed = false
+    async function fetchHubInfo() {
+      try {
+        const res = await fetch('/api/hub')
+        const info = await res.json() as {
+          daemonHubUrl?: unknown
+          daemonTokenRequired?: unknown
+          daemonToken?: unknown
+        }
+        if (!disposed && typeof info.daemonHubUrl === 'string' && info.daemonHubUrl.trim()) {
+          setDaemonHubUrl(info.daemonHubUrl)
+        }
+        if (!disposed) {
+          setDaemonTokenRequired(Boolean(info.daemonTokenRequired))
+          setDaemonToken(typeof info.daemonToken === 'string' && info.daemonToken ? info.daemonToken : null)
+        }
+      } catch {
+        // Fall back to the browser URL.
+      }
+    }
+    fetchHubInfo()
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  async function copyCommand(label: string, command: string) {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(command)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = command
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      textarea.remove()
+    }
+    setCopied(label)
+    window.setTimeout(() => setCopied(current => current === label ? null : current), 1500)
+  }
+
+  return (
+    <div className="connect-panel">
+      <div className="connect-panel-title">Connect a daemon</div>
+      <p>Install Switch from the private repo, then launch a daemon with this hub URL. For private Spaces, set HF_TOKEN in the shell first.</p>
+      <CommandCopyRow
+        label="Install"
+        command={installCommand}
+        copied={copied === 'install'}
+        onCopy={() => copyCommand('install', installCommand)}
+      />
+      <CommandCopyRow
+        label="Launch"
+        command={daemonCommand}
+        copied={copied === 'launch'}
+        onCopy={() => copyCommand('launch', daemonCommand)}
+      />
+    </div>
+  )
+}
+
+function daemonLaunchCommand(
+  daemonHubUrl: string,
+  daemonTokenRequired: boolean,
+  daemonToken: string | null,
+): string {
+  if (!daemonTokenRequired) {
+    return `switch daemon --hub ${daemonHubUrl}`
+  }
+  if (daemonToken) {
+    return `switch daemon --hub ${daemonHubUrl} --token ${daemonToken}`
+  }
+  return `SWITCH_DAEMON_TOKEN=<token> switch daemon --hub ${daemonHubUrl}`
+}
+
+function CommandCopyRow({
+  label,
+  command,
+  copied,
+  onCopy,
+}: {
+  label: string
+  command: string
+  copied: boolean
+  onCopy: () => void
+}) {
+  return (
+    <div className="command-copy-row">
+      <span className="command-label">{label}</span>
+      <code title={command}>{command}</code>
+      <button type="button" className="copy-button" onClick={onCopy}>
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  )
+}
 
 function readStoredSelection(): { daemonId: string; sessionId: string } | null {
   try {

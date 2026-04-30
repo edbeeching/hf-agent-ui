@@ -6,9 +6,8 @@ import logging
 import os
 import signal
 
-from .registration import HubRegistration
+from .hub_client import HubDaemonClient
 from .session_manager import SessionManager
-from .ws_server import DaemonWsServer
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,12 +19,22 @@ def parse_args() -> argparse.Namespace:
         "-p", "--port",
         type=int,
         default=int(os.environ.get("SWITCH_DAEMON_PORT", "9340")),
-        help="WebSocket port to listen on (default: 9340, env: SWITCH_DAEMON_PORT)",
+        help="Deprecated; ignored in outbound mode",
     )
     parser.add_argument(
         "--hub",
         default=os.environ.get("SWITCH_HUB_URL", "http://localhost:9341"),
         help="Hub URL to register with (default: http://localhost:9341, env: SWITCH_HUB_URL)",
+    )
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("SWITCH_DAEMON_TOKEN"),
+        help="Daemon auth token (env: SWITCH_DAEMON_TOKEN)",
+    )
+    parser.add_argument(
+        "--hf-token",
+        default=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"),
+        help="Hugging Face token for private Spaces (env: HF_TOKEN)",
     )
     parser.add_argument(
         "-n", "--name",
@@ -51,15 +60,10 @@ async def run(args: argparse.Namespace) -> None:
     logger = logging.getLogger(__name__)
 
     manager = SessionManager()
-    ws_server = DaemonWsServer(manager, args.port)
-    registration = HubRegistration(args.hub, name, args.port)
+    client = HubDaemonClient(manager, args.hub, name, token=args.token, hf_token=args.hf_token)
+    client_task = asyncio.create_task(client.run_forever())
 
-    await ws_server.start()
-
-    await registration.register()
-    await registration.start_heartbeat()
-
-    logger.info("Ready — listening on :%d, registered with hub at %s", args.port, args.hub)
+    logger.info("Ready — connecting outbound to hub at %s", args.hub)
 
     stop_event = asyncio.Event()
 
@@ -73,9 +77,13 @@ async def run(args: argparse.Namespace) -> None:
 
     await stop_event.wait()
 
+    client.stop()
+    client_task.cancel()
+    try:
+        await client_task
+    except asyncio.CancelledError:
+        pass
     manager.stop_all()
-    await ws_server.stop()
-    await registration.stop()
 
 
 def main() -> None:

@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import platform
+from typing import Any
+from urllib.parse import urlencode, urlsplit, urlunsplit
+
+import websockets
+
+from .session_manager import SessionManager
+from .ws_server import DaemonWsServer
+
+logger = logging.getLogger(__name__)
+
+
+class HubDaemonClient:
+    """Maintains the daemon's outbound WebSocket connection to the hub."""
+
+    def __init__(
+        self,
+        manager: SessionManager,
+        hub_url: str,
+        daemon_name: str,
+        token: str | None = None,
+        hf_token: str | None = None,
+    ) -> None:
+        self.manager = manager
+        self.hub_url = hub_url.rstrip("/")
+        self.daemon_name = daemon_name
+        self.token = token
+        self.hf_token = hf_token
+        self._running = False
+        self._warned_missing_hf_token = False
+
+    async def run_forever(self) -> None:
+        self._running = True
+        backoff = 1.0
+        while self._running:
+            try:
+                await self._connect_once()
+                backoff = 1.0
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Hub connection failed, retrying in %.0fs", backoff)
+
+            if self._running:
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+
+    def stop(self) -> None:
+        self._running = False
+
+    async def _connect_once(self) -> None:
+        ws_url = _daemon_ws_url(self.hub_url, query_token=self.token)
+        headers = _auth_headers(self.hf_token)
+        if _is_hf_space_url(self.hub_url) and not self.hf_token and not self._warned_missing_hf_token:
+            logger.warning("Private Hugging Face Spaces require HF_TOKEN or --hf-token for daemon connections")
+            self._warned_missing_hf_token = True
+        logger.info("Connecting to hub at %s", _daemon_ws_url(self.hub_url))
+
+        async with websockets.connect(ws_url, additional_headers=headers) as ws:
+            await ws.send(json.dumps({
+                "type": "daemon.register",
+                "name": self.daemon_name,
+                "hostname": platform.node(),
+            }))
+            registered = json.loads(await ws.recv())
+            if registered.get("type") != "daemon.registered":
+                raise RuntimeError(f"Hub rejected daemon registration: {registered}")
+            logger.info("Registered with hub as %s (id=%s)", self.daemon_name, registered.get("daemonId"))
+
+            handler = DaemonWsServer(self.manager, port=0)
+            handler._subscriptions[ws] = set()  # type: ignore[index]
+            try:
+                async for raw in ws:
+                    await self._handle_hub_message(handler, ws, raw)
+            finally:
+                handler._unsubscribe_all(ws)  # type: ignore[arg-type]
+                handler._subscriptions.pop(ws, None)  # type: ignore[arg-type]
+
+    @staticmethod
+    async def _handle_hub_message(handler: DaemonWsServer, ws: Any, raw: str) -> None:
+        try:
+            req = json.loads(raw)
+        except json.JSONDecodeError:
+            await handler._send(ws, {"type": "error", "message": "Invalid JSON"})
+            return
+        await handler._handle_request(ws, req)
+
+
+def _daemon_ws_url(hub_url: str, query_token: str | None = None) -> str:
+    parsed = urlsplit(hub_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    path = parsed.path.rstrip("/")
+    path = f"{path}/daemon/ws" if path else "/daemon/ws"
+    query = urlencode({"token": query_token}) if query_token else ""
+    return urlunsplit((scheme, parsed.netloc, path, query, ""))
+
+
+def _auth_headers(hf_token: str | None) -> dict[str, str] | None:
+    return {"Authorization": f"Bearer {hf_token}"} if hf_token else None
+
+
+def _is_hf_space_url(hub_url: str) -> bool:
+    return urlsplit(hub_url).netloc.endswith(".hf.space")

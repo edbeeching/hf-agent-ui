@@ -143,6 +143,39 @@ def test_run_daemon_does_not_kill_port_by_default(monkeypatch) -> None:
     monkeypatch.setattr(cli, "_kill_port", lambda port: killed_ports.append(port))
     monkeypatch.setattr(asyncio, "run", lambda coro: coro.close())
 
-    cli._run_daemon(argparse.Namespace(port=9340, hub="http://localhost:9341", name=None, verbose=False))
+    cli._run_daemon(argparse.Namespace(
+        port=9340,
+        hub="http://localhost:9341",
+        token=None,
+        hf_token=None,
+        name=None,
+        verbose=False,
+    ))
 
     assert killed_ports == []
+
+
+def test_daemon_token_defaults_to_env(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "from-env")
+
+    assert cli._daemon_token(argparse.Namespace(token=None)) == "from-env"
+    assert cli._daemon_token(argparse.Namespace()) == "from-env"
+
+
+def test_daemon_token_uses_explicit_value(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "from-env")
+
+    assert cli._daemon_token(argparse.Namespace(token="explicit")) == "explicit"
+
+
+def test_hf_token_defaults_to_env(monkeypatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf-env")
+
+    assert cli._hf_token(argparse.Namespace(hf_token=None)) == "hf-env"
+    assert cli._hf_token(argparse.Namespace()) == "hf-env"
+
+
+def test_hf_token_uses_explicit_value(monkeypatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf-env")
+
+    assert cli._hf_token(argparse.Namespace(hf_token="hf-explicit")) == "hf-explicit"

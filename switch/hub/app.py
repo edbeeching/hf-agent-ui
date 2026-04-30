@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,14 +19,13 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     registry = DaemonRegistry()
-    pool = DaemonConnectionPool(on_message=lambda did, msg: _on_daemon_message(app, did, msg))
+    pool = DaemonConnectionPool(registry, on_message=lambda did, msg: _on_daemon_message(app, did, msg))
     relay = WsRelay(pool)
 
     app.state.registry = registry
     app.state.pool = pool
     app.state.relay = relay
 
-    await registry.start_prune_loop(interval=5.0)
     logger.info("Hub started")
 
     yield
@@ -51,8 +51,13 @@ async def ws_endpoint(ws: WebSocket) -> None:
     await relay.handle_browser(ws)
 
 
+@app.websocket("/daemon/ws")
+async def daemon_ws_endpoint(ws: WebSocket) -> None:
+    pool: DaemonConnectionPool = app.state.pool
+    await pool.handle_daemon(ws, expected_token=os.environ.get("SWITCH_DAEMON_TOKEN"))
+
+
 # Serve bundled web UI (skipped in dev mode — use Vite dev server instead)
-import os
 if not os.environ.get("SWITCH_DEV"):
     STATIC_DIR = Path(__file__).parent / "static"
     if STATIC_DIR.is_dir():

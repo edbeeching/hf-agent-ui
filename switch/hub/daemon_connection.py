@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any, Callable, Coroutine
 
-import websockets
-from websockets.asyncio.client import ClientConnection
+from fastapi import WebSocket, WebSocketDisconnect, status
 
-from .daemon_registry import DaemonInfo
+from .daemon_registry import DaemonInfo, DaemonRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -16,95 +14,77 @@ MessageCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
 
 
 class DaemonConnection:
-    """Manages a WebSocket connection to a single daemon."""
+    """A daemon-held WebSocket connection to the hub."""
 
-    def __init__(self, daemon: DaemonInfo, on_message: MessageCallback) -> None:
+    def __init__(self, daemon: DaemonInfo, ws: WebSocket, on_message: MessageCallback) -> None:
         self.daemon = daemon
+        self._ws = ws
         self._on_message = on_message
-        self._ws: ClientConnection | None = None
-        self._task: asyncio.Task | None = None
-        self._running = False
 
-    @property
-    def connected(self) -> bool:
-        return self._ws is not None
-
-    async def connect(self) -> None:
-        self._running = True
-        self._task = asyncio.create_task(self._connect_loop())
-
-    async def _connect_loop(self) -> None:
-        backoff = 1.0
-        while self._running:
+    async def run(self) -> None:
+        async for raw in self._ws.iter_text():
             try:
-                uri = f"ws://{self.daemon.host}:{self.daemon.port}"
-                # The daemon host might be 0.0.0.0 — use hostname or localhost
-                if self.daemon.host == "0.0.0.0":
-                    uri = f"ws://{self.daemon.hostname}:{self.daemon.port}"
-
-                logger.info("Connecting to daemon %s at %s", self.daemon.name, uri)
-                async with websockets.connect(uri) as ws:
-                    self._ws = ws
-                    backoff = 1.0
-                    logger.info("Connected to daemon %s", self.daemon.name)
-                    async for raw in ws:
-                        try:
-                            msg = json.loads(raw)
-                            logger.debug("from daemon %s: %s", self.daemon.name, msg.get("type", "?"))
-                            await self._on_message(self.daemon.id, msg)
-                        except json.JSONDecodeError:
-                            logger.warning("Invalid JSON from daemon %s", self.daemon.name)
-            except websockets.ConnectionClosed:
-                logger.warning("Connection to daemon %s closed", self.daemon.name)
-            except Exception:
-                logger.warning("Failed to connect to daemon %s, retrying in %.0fs", self.daemon.name, backoff)
-            finally:
-                self._ws = None
-
-            if self._running:
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON from daemon %s", self.daemon.name)
+                continue
+            logger.debug("from daemon %s: %s", self.daemon.name, msg.get("type", "?"))
+            await self._on_message(self.daemon.id, msg)
 
     async def send(self, data: dict[str, Any]) -> None:
-        if self._ws:
-            await self._ws.send(json.dumps(data, default=str))
-        else:
-            raise RuntimeError(f"Not connected to daemon {self.daemon.name}")
+        await self._ws.send_text(json.dumps(data, default=str))
 
-    async def disconnect(self) -> None:
-        self._running = False
-        if self._ws:
+    async def close(self) -> None:
+        try:
             await self._ws.close()
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-        self._ws = None
-        self._task = None
+        except RuntimeError:
+            pass
 
 
 class DaemonConnectionPool:
-    """Manages connections to all registered daemons."""
+    """Tracks outbound daemon connections initiated by daemon processes."""
 
-    def __init__(self, on_message: MessageCallback) -> None:
+    def __init__(self, registry: DaemonRegistry, on_message: MessageCallback) -> None:
+        self.registry = registry
         self._connections: dict[str, DaemonConnection] = {}
         self._on_message = on_message
 
-    async def connect(self, daemon: DaemonInfo) -> None:
-        # Disconnect old connection if it exists (e.g. daemon re-registered)
-        old = self._connections.get(daemon.id)
-        if old:
-            await old.disconnect()
-        conn = DaemonConnection(daemon, self._on_message)
-        self._connections[daemon.id] = conn
-        await conn.connect()
+    async def handle_daemon(self, ws: WebSocket, expected_token: str | None = None) -> None:
+        if not _is_authorized(ws, expected_token):
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
 
-    async def disconnect(self, daemon_id: str) -> None:
-        conn = self._connections.pop(daemon_id, None)
-        if conn:
-            await conn.disconnect()
+        await ws.accept()
+        daemon: DaemonInfo | None = None
+        conn: DaemonConnection | None = None
+
+        try:
+            register_msg = await ws.receive_text()
+            register_payload = json.loads(register_msg)
+            if not isinstance(register_payload, dict):
+                raise ValueError("daemon.register payload must be an object")
+            daemon = self._register(register_payload)
+            old = self._connections.get(daemon.id)
+            conn = DaemonConnection(daemon, ws, self._on_message)
+            self._connections[daemon.id] = conn
+            if old:
+                await old.close()
+            await conn.send({
+                "type": "daemon.registered",
+                "daemonId": daemon.id,
+                "name": daemon.name,
+            })
+            logger.info("Daemon %s connected over outbound WebSocket", daemon.name)
+            await conn.run()
+        except (json.JSONDecodeError, ValueError) as exc:
+            await _send_error(ws, str(exc))
+        except WebSocketDisconnect:
+            pass
+        finally:
+            if daemon and self._connections.get(daemon.id) is conn:
+                self._connections.pop(daemon.id, None)
+                self.registry.remove(daemon.id)
+                logger.info("Daemon %s disconnected", daemon.name)
 
     async def send(self, daemon_id: str, data: dict[str, Any]) -> None:
         conn = self._connections.get(daemon_id)
@@ -113,10 +93,37 @@ class DaemonConnectionPool:
         await conn.send(data)
 
     def is_connected(self, daemon_id: str) -> bool:
-        conn = self._connections.get(daemon_id)
-        return conn.connected if conn else False
+        return daemon_id in self._connections
 
     async def disconnect_all(self) -> None:
-        for conn in self._connections.values():
-            await conn.disconnect()
+        for conn in list(self._connections.values()):
+            await conn.close()
         self._connections.clear()
+
+    def _register(self, msg: dict[str, Any]) -> DaemonInfo:
+        if msg.get("type") != "daemon.register":
+            raise ValueError("First daemon message must be daemon.register")
+        name = msg.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("daemon.register requires a non-empty name")
+        hostname = msg.get("hostname")
+        if not isinstance(hostname, str):
+            hostname = ""
+        return self.registry.register(name.strip(), "outbound", 0, hostname)
+
+
+def _is_authorized(ws: WebSocket, expected_token: str | None) -> bool:
+    if not expected_token:
+        return True
+    auth = ws.headers.get("authorization", "")
+    if auth == f"Bearer {expected_token}":
+        return True
+    return ws.query_params.get("token") == expected_token
+
+
+async def _send_error(ws: WebSocket, message: str) -> None:
+    try:
+        await ws.send_text(json.dumps({"type": "error", "message": message}))
+        await ws.close(code=status.WS_1008_POLICY_VIOLATION)
+    except RuntimeError:
+        pass

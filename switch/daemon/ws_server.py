@@ -50,6 +50,7 @@ class DaemonWsServer:
         self._server: Server | None = None
         # Track subscriptions: ws -> set of session_ids
         self._subscriptions: dict[ServerConnection, set[str]] = {}
+        self._session_callbacks: dict[Any, dict[str, Any]] = {}
 
     async def start(self) -> None:
         self._server = await websockets.serve(self._handle_connection, "0.0.0.0", self.port)
@@ -233,13 +234,10 @@ class DaemonWsServer:
                 logger.exception("Failed to forward event to hub")
 
         session.on_event(on_event)
-        # Store callback ref for cleanup
-        if not hasattr(ws, "_session_callbacks"):
-            ws._session_callbacks = {}  # type: ignore[attr-defined]
-        ws._session_callbacks[session.id] = on_event  # type: ignore[attr-defined]
+        self._session_callbacks.setdefault(ws, {})[session.id] = on_event
 
     def _unsubscribe_all(self, ws: ServerConnection) -> None:
-        callbacks = getattr(ws, "_session_callbacks", {})
+        callbacks = self._session_callbacks.pop(ws, {})
         for session_id, cb in callbacks.items():
             session = self.manager.get(session_id)
             if session:

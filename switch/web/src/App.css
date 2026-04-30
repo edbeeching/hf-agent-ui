@@ -15,7 +15,7 @@
   border-right: 1px solid #30363d;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .sidebar-title {
@@ -48,6 +48,8 @@
 .daemon-list {
   flex: 1;
   padding: 8px 0;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .daemon-list-header h2 {
@@ -66,27 +68,53 @@
   text-align: center;
 }
 
-.daemon-group {
-  margin-bottom: 4px;
+.environment-group {
+  margin-bottom: 10px;
 }
 
-.daemon-header {
+.environment-header {
+  padding: 10px 16px 4px;
+  color: #f0f6fc;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.project-group {
+  margin-bottom: 8px;
+}
+
+.project-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 16px;
-  font-size: 13px;
+  padding: 4px 16px 4px 24px;
+  color: #8b949e;
+  font-size: 11px;
   font-weight: 600;
 }
 
-.daemon-name {
+.project-name {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.daemon-hostname {
-  font-size: 11px;
-  color: #8b949e;
-  font-weight: 400;
+.project-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  color: #c9d1d9;
+  text-align: center;
+  line-height: 16px;
+}
+
+.project-action {
+  flex-shrink: 0;
 }
 
 .btn-icon {
@@ -186,7 +214,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 16px 6px 32px;
+  padding: 6px 16px 6px 40px;
   font-size: 12px;
   cursor: pointer;
   color: #8b949e;
@@ -210,6 +238,15 @@
   background: #9a670040;
 }
 
+.empty-session {
+  cursor: default;
+  color: #6e7681;
+}
+
+.empty-session:hover {
+  background: transparent;
+}
+
 .input-required-badge {
   width: 14px;
   height: 14px;
@@ -226,7 +263,17 @@
 
 .session-dir {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-daemon {
+  max-width: 72px;
+  overflow: hidden;
+  color: #6e7681;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -373,4 +420,68 @@
 
 .dialog-actions button:hover {
   filter: brightness(1.1);
+}
+
+/* Connect panel */
+.connect-panel {
+  flex-shrink: 0;
+  padding: 12px;
+  border-top: 1px solid #30363d;
+  background: #0d1117;
+}
+
+.connect-panel-title {
+  margin-bottom: 6px;
+  color: #f0f6fc;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.connect-panel p {
+  margin: 0 0 10px;
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.command-copy-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 48px;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.command-label {
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.command-copy-row code {
+  min-width: 0;
+  overflow: hidden;
+  padding: 5px 6px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #161b22;
+  color: #c9d1d9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-button {
+  height: 26px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #21262d;
+  color: #e6edf3;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.copy-button:hover {
+  background: #30363d;
 }
