@@ -2,6 +2,7 @@
 .app {
   display: flex;
   height: 100vh;
+  min-height: 0;
   background: #0d1117;
   color: #e6edf3;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
@@ -533,4 +534,250 @@
   background: #161b22;
   color: #6e7681;
   font-size: 11px;
+}
+
+.mobile-connect-panel,
+.mobile-tabbar {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .app {
+    position: relative;
+    display: block;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .sidebar,
+  .main-panel,
+  .mobile-connect-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: calc(56px + env(safe-area-inset-bottom));
+    left: 0;
+    display: none;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+  }
+
+  .sidebar.mobile-active,
+  .main-panel.mobile-active,
+  .mobile-connect-panel.mobile-active {
+    display: flex;
+  }
+
+  .sidebar {
+    background: #0d1117;
+  }
+
+  .sidebar > .connect-panel {
+    display: none;
+  }
+
+  .sidebar-title {
+    min-height: 56px;
+    padding: 12px 16px;
+    background: #161b22;
+  }
+
+  .sidebar-title h1 {
+    font-size: 17px;
+  }
+
+  .connection-badge {
+    padding: 4px 10px;
+  }
+
+  .daemon-list {
+    padding: 6px 0 14px;
+  }
+
+  .daemon-list-header h2 {
+    padding: 10px 16px;
+  }
+
+  .environment-header {
+    min-height: 48px;
+    padding: 8px 16px;
+    background: #161b22;
+    border-top: 1px solid #30363d;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .project-header {
+    min-height: 36px;
+    padding: 8px 16px;
+  }
+
+  .project-count {
+    height: 22px;
+    min-width: 24px;
+    line-height: 20px;
+  }
+
+  .btn-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .session-item {
+    min-height: 48px;
+    padding: 8px 12px 8px 16px;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .session-action {
+    opacity: 1;
+  }
+
+  .session-daemon {
+    max-width: 86px;
+    font-size: 11px;
+  }
+
+  .tool-badge,
+  .launch-badge {
+    font-size: 10px;
+  }
+
+  .main-panel {
+    background: #0d1117;
+  }
+
+  .terminal-container {
+    height: 100%;
+  }
+
+  .terminal-container .xterm {
+    padding: 4px;
+  }
+
+  .session-view-empty {
+    padding: 24px;
+    text-align: center;
+  }
+
+  .mobile-connect-panel {
+    overflow-y: auto;
+    background: #0d1117;
+  }
+
+  .mobile-connect-panel .connect-panel {
+    width: 100%;
+    min-height: 100%;
+    padding: 16px;
+    border-top: 0;
+  }
+
+  .connect-panel-title {
+    font-size: 14px;
+  }
+
+  .connect-panel p {
+    font-size: 13px;
+  }
+
+  .command-copy-row {
+    grid-template-columns: minmax(0, 1fr) 84px;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .command-label {
+    grid-column: 1 / -1;
+    font-size: 12px;
+  }
+
+  .command-copy-row code {
+    min-height: 44px;
+    white-space: normal;
+    word-break: break-all;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .copy-button,
+  .update-button {
+    height: 44px;
+    font-size: 12px;
+  }
+
+  .mobile-tabbar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100vw;
+    min-height: calc(56px + env(safe-area-inset-bottom));
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    overflow: hidden;
+    background: #161b22;
+    border-top: 1px solid #30363d;
+  }
+
+  .mobile-tabbar button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #8b949e;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .mobile-tabbar button.active {
+    background: #1f6feb22;
+    color: #f0f6fc;
+  }
+
+  .dialog-overlay {
+    align-items: flex-end;
+    justify-content: stretch;
+  }
+
+  .dialog {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 10px 10px 0 0;
+  }
+
+  .dialog input,
+  .dialog select,
+  .dialog textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .dialog textarea {
+    min-height: 88px;
+  }
+
+  .dialog-actions {
+    gap: 10px;
+  }
+
+  .dialog-actions button {
+    min-height: 44px;
+    flex: 1;
+    font-size: 14px;
+  }
 }
