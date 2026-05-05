@@ -66,6 +66,38 @@ def test_daemon_ws_allows_query_token(monkeypatch) -> None:
             assert daemon_ws.receive_json()["type"] == "daemon.registered"
 
 
+def test_daemon_ws_allows_host_token_header(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/daemon/ws", headers={"X-Agentic-UI-Host-Token": "secret"}) as daemon_ws:
+            daemon_ws.send_json({
+                "type": "daemon.register",
+                "name": "remote",
+                "hostname": "devbox",
+            })
+            assert daemon_ws.receive_json()["type"] == "daemon.registered"
+
+
+def test_browser_ws_requires_ui_token_for_remote_browser(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(app, base_url="http://hub.example.test:9341") as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws"):
+                pass
+
+
+def test_browser_ws_allows_ui_token_query_for_remote_browser(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(app, base_url="http://hub.example.test:9341") as client:
+        with client.websocket_connect("/ws?uiToken=ui-secret"):
+            pass
+
+
 def test_daemon_ws_rejects_duplicate_active_name(monkeypatch) -> None:
     monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
 

@@ -9,6 +9,7 @@ from fastapi import WebSocket, WebSocketDisconnect, status
 from .daemon_registry import DaemonInfo, DaemonRegistry
 
 logger = logging.getLogger(__name__)
+HOST_TOKEN_HEADER = "x-agentic-ui-host-token"
 
 MessageCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
 
@@ -126,6 +127,9 @@ class DaemonConnectionPool:
 
 def _is_authorized(ws: WebSocket, expected_token: str | None) -> bool:
     if not expected_token:
+        return True
+    host_token = ws.headers.get(HOST_TOKEN_HEADER, "")
+    if host_token == expected_token:
         return True
     auth = ws.headers.get("authorization", "")
     if auth == f"Bearer {expected_token}":

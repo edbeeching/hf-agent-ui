@@ -14,7 +14,8 @@ def main() -> None:
     # --- hub ---
     hub_p = sub.add_parser("hub", help="Start the hub server (includes web UI)")
     hub_p.add_argument("-p", "--port", type=int, default=9341, help="Port (default: 9341)")
-    hub_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    hub_p.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    hub_p.add_argument("--allow-insecure", action="store_true", help="Allow a network-reachable hub without SWITCH_UI_TOKEN")
     hub_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     hub_p.add_argument("--dev", action="store_true", help="Dev mode: auto-reload on Python changes, use Vite for frontend")
     hub_p.add_argument("--local-agent-host", "--local-daemon", dest="local_daemon", action="store_true", help="Also launch a local agent host for this hub")
@@ -83,6 +84,17 @@ def _display_host_for_daemons(bind_host: str) -> str:
     if bind_host in {"0.0.0.0", "::"}:
         return _detect_reachable_ip() or "localhost"
     return bind_host
+
+
+def _is_public_bind_host(bind_host: str) -> bool:
+    host = bind_host.strip().lower()
+    return host not in {"127.0.0.1", "localhost", "::1"}
+
+
+def _has_browser_auth_configured() -> bool:
+    import os
+
+    return bool(os.environ.get("SWITCH_UI_TOKEN")) or os.environ.get("SWITCH_TRUST_PROXY_AUTH") == "1"
 
 
 def _display_host_for_browser(bind_host: str) -> str:
@@ -184,7 +196,7 @@ def _run_dev() -> None:
         # Hub with auto-reload
         procs.append(subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "switch.hub.app:app",
-             "--host", "0.0.0.0", "--port", "9341", "--reload", "--reload-dir", "switch"],
+             "--host", "127.0.0.1", "--port", "9341", "--reload", "--reload-dir", "switch"],
             start_new_session=True,
         ))
         # Wait for hub to be ready before starting the agent host
@@ -258,6 +270,15 @@ def _run_hub(args: argparse.Namespace) -> None:
         format="[agentic-ui hub] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    if _is_public_bind_host(args.host) and not _has_browser_auth_configured() and not getattr(args, "allow_insecure", False):
+        print(
+            "Error: refusing to bind a hub to a network-reachable address without browser auth.\n"
+            "Set SWITCH_UI_TOKEN, set SWITCH_TRUST_PROXY_AUTH=1 behind a trusted private proxy, "
+            "or pass --allow-insecure for local trusted-network use.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     daemon_url = f"http://{_display_host_for_daemons(args.host)}:{args.port}"
     browser_url = f"http://{_display_host_for_browser(args.host)}:{args.port}"

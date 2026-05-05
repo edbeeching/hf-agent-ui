@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api")
+from .security import require_browser_http, should_expose_host_token
+
+router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http)])
 
 
 @router.get("/hub")
@@ -26,7 +28,7 @@ async def hub_info(request: Request) -> dict[str, Any]:
         "daemonHubUrl": daemon_hub_url,
         "daemonTokenRequired": bool(daemon_token),
     }
-    if daemon_token and os.environ.get("SWITCH_EXPOSE_DAEMON_TOKEN") == "1":
+    if daemon_token and should_expose_host_token():
         payload["daemonToken"] = daemon_token
     return payload
 

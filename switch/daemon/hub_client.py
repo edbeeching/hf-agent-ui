@@ -13,6 +13,7 @@ from .session_manager import SessionManager
 from .ws_server import DaemonWsServer
 
 logger = logging.getLogger(__name__)
+HOST_TOKEN_HEADER = "X-Agentic-UI-Host-Token"
 
 
 class HubDaemonClient:
@@ -54,8 +55,8 @@ class HubDaemonClient:
         self._running = False
 
     async def _connect_once(self) -> None:
-        ws_url = _daemon_ws_url(self.hub_url, query_token=self.token)
-        headers = _auth_headers(self.hf_token)
+        ws_url = _daemon_ws_url(self.hub_url)
+        headers = _auth_headers(self.hf_token, host_token=self.token)
         if _is_hf_space_url(self.hub_url) and not self.hf_token and not self._warned_missing_hf_token:
             logger.warning("Private Hugging Face Spaces require HF_TOKEN or --hf-token for agent host connections")
             self._warned_missing_hf_token = True
@@ -100,8 +101,13 @@ def _daemon_ws_url(hub_url: str, query_token: str | None = None) -> str:
     return urlunsplit((scheme, parsed.netloc, path, query, ""))
 
 
-def _auth_headers(hf_token: str | None) -> dict[str, str] | None:
-    return {"Authorization": f"Bearer {hf_token}"} if hf_token else None
+def _auth_headers(hf_token: str | None, host_token: str | None = None) -> dict[str, str] | None:
+    headers: dict[str, str] = {}
+    if hf_token:
+        headers["Authorization"] = f"Bearer {hf_token}"
+    if host_token:
+        headers[HOST_TOKEN_HEADER] = host_token
+    return headers or None
 
 
 def _is_hf_space_url(hub_url: str) -> bool:

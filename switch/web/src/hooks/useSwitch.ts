@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { initializeUiTokenFromUrl, uiAuthFetch, uiWebSocketUrl } from '../auth'
 
 type JsonObject = Record<string, unknown>
+
+initializeUiTokenFromUrl()
 
 export type LaunchMode = 'local' | 'custom'
 
@@ -63,7 +66,7 @@ export function useSwitch() {
 
   const fetchDaemons = useCallback(async () => {
     try {
-      const res = await fetch('/api/daemons')
+      const res = await uiAuthFetch('/api/daemons')
       const daemons: Daemon[] = await res.json()
       setState(s => {
         const daemonIds = new Set(daemons.map(daemon => daemon.id))
@@ -222,8 +225,7 @@ export function useSwitch() {
 
   useEffect(() => {
     let disposed = false
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws`
+    const wsUrl = uiWebSocketUrl('/ws')
 
     function connect() {
       if (disposed) return

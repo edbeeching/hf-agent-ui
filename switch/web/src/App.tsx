@@ -4,6 +4,7 @@ import type { Daemon } from './hooks/useSwitch'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
+import { uiAuthFetch } from './auth'
 import './App.css'
 
 const SELECTED_SESSION_STORAGE_KEY = 'switch.selectedSession'
@@ -162,7 +163,7 @@ function ConnectDaemonPanel() {
     let disposed = false
     async function fetchHubInfo() {
       try {
-        const res = await fetch('/api/hub')
+        const res = await uiAuthFetch('/api/hub')
         const info = await res.json() as {
           daemonHubUrl?: unknown
           daemonTokenRequired?: unknown
@@ -239,7 +240,7 @@ function daemonLaunchCommand(
     return `switch host --hub ${daemonHubUrl}`
   }
   if (daemonToken) {
-    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}`
+    return `SWITCH_DAEMON_TOKEN=${daemonToken} switch host --hub ${daemonHubUrl}`
   }
   return `SWITCH_DAEMON_TOKEN=<token> switch host --hub ${daemonHubUrl}`
 }
