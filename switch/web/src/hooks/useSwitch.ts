@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { initializeUiTokenFromUrl, uiAuthFetch, uiWebSocketUrl } from '../auth'
+import { ensureUiTokenCookie, initializeUiTokenFromUrl, uiAuthFetch, uiWebSocketUrl } from '../auth'
 
 type JsonObject = Record<string, unknown>
 
@@ -225,10 +225,12 @@ export function useSwitch() {
 
   useEffect(() => {
     let disposed = false
-    const wsUrl = uiWebSocketUrl('/ws')
 
-    function connect() {
+    async function connect() {
       if (disposed) return
+      await ensureUiTokenCookie()
+      if (disposed) return
+      const wsUrl = uiWebSocketUrl('/ws')
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
@@ -241,7 +243,7 @@ export function useSwitch() {
       ws.onclose = () => {
         if (disposed) return
         setState(s => ({ ...s, connected: false }))
-        setTimeout(connect, 2000)
+        setTimeout(() => { void connect() }, 2000)
       }
 
       ws.onmessage = (event) => {
@@ -251,7 +253,7 @@ export function useSwitch() {
       }
     }
 
-    connect()
+    void connect()
 
     const interval = setInterval(fetchDaemons, 3000)
 

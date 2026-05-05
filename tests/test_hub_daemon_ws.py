@@ -98,6 +98,39 @@ def test_browser_ws_allows_ui_token_query_for_remote_browser(monkeypatch) -> Non
             pass
 
 
+def test_browser_ws_allows_ui_token_cookie_for_remote_browser(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(
+        app,
+        base_url="https://hub.example.test:9341",
+        client=("203.0.113.10", 50000),
+    ) as client:
+        response = client.post(
+            "/api/auth/browser-cookie",
+            headers={"X-Agentic-UI-Token": "ui-secret"},
+        )
+        assert response.status_code == 200
+
+        with client.websocket_connect("/ws", headers={"Cookie": "agentic_ui_token=ui-secret"}):
+            pass
+
+
+def test_browser_ws_rejects_spoofed_local_host_from_remote_client(monkeypatch) -> None:
+    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(
+        app,
+        base_url="http://hub.example.test:9341",
+        client=("203.0.113.10", 50000),
+    ) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws", headers={"Host": "localhost:9341"}):
+                pass
+
+
 def test_daemon_ws_rejects_duplicate_active_name(monkeypatch) -> None:
     monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
 

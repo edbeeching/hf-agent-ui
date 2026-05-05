@@ -178,6 +178,68 @@ def test_run_hub_can_launch_local_daemon(monkeypatch) -> None:
     assert killpg_calls == [(12345, 15)]
 
 
+def test_run_hub_ready_check_uses_ui_token(monkeypatch) -> None:
+    class FakeTimer:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+    class FakeThread:
+        def __init__(self, target, daemon: bool) -> None:
+            self.target = target
+            self.daemon = daemon
+
+        def start(self) -> None:
+            self.target()
+
+    class FakeProc:
+        pid = 12345
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+    get_calls = []
+
+    import httpx
+    import os
+    import uvicorn
+
+    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.setattr(threading, "Timer", FakeTimer)
+    monkeypatch.setattr(threading, "Thread", FakeThread)
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: get_calls.append((args, kwargs)) or object())
+    monkeypatch.setattr(subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(os, "killpg", lambda *args, **kwargs: None)
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+
+    cli._run_hub(argparse.Namespace(
+        port=9341,
+        host="127.0.0.1",
+        verbose=False,
+        dev=False,
+        local_daemon=True,
+        daemon_port=9440,
+        daemon_name="dev-local",
+        allow_insecure=False,
+    ))
+
+    assert get_calls
+    assert get_calls[0][1]["headers"] == {"X-Agentic-UI-Token": "ui-secret"}
+
+
 def test_run_hub_refuses_public_bind_without_auth(monkeypatch, capsys) -> None:
     monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
     monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
