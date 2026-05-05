@@ -114,6 +114,48 @@ def test_api_requires_ui_token_for_remote_browser(monkeypatch) -> None:
     assert response.status_code == 401
 
 
+def test_api_rejects_spoofed_local_host_from_remote_client(monkeypatch) -> None:
+    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(
+        app,
+        base_url="http://hub.example.test:9341",
+        client=("203.0.113.10", 50000),
+    ) as client:
+        response = client.get("/api/daemons", headers={"Host": "localhost:9341"})
+
+    assert response.status_code == 401
+
+
+def test_api_rejects_proxy_public_host_without_browser_auth(monkeypatch) -> None:
+    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(
+        app,
+        base_url="http://hub.example.test:9341",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        response = client.get("/api/daemons")
+
+    assert response.status_code == 401
+
+
+def test_api_allows_local_browser_without_ui_token(monkeypatch) -> None:
+    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(
+        app,
+        base_url="http://localhost:9341",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        response = client.get("/api/daemons")
+
+    assert response.status_code == 200
+
+
 def test_api_allows_ui_token_header_for_remote_browser(monkeypatch) -> None:
     monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
     monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
@@ -122,6 +164,33 @@ def test_api_allows_ui_token_header_for_remote_browser(monkeypatch) -> None:
         response = client.get("/api/daemons", headers={"X-Agentic-UI-Token": "ui-secret"})
 
     assert response.status_code == 200
+
+
+def test_auth_cookie_endpoint_sets_httponly_cookie(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    with TestClient(
+        app,
+        base_url="https://hub.example.test:9341",
+        client=("203.0.113.10", 50000),
+    ) as client:
+        response = client.post(
+            "/api/auth/browser-cookie",
+            headers={"X-Agentic-UI-Token": "ui-secret"},
+        )
+        cookie = response.headers["set-cookie"]
+
+        assert response.status_code == 200
+        assert response.json() == {"cookie": True}
+        assert "agentic_ui_token=ui-secret" in cookie
+        assert "HttpOnly" in cookie
+        assert "Secure" in cookie
+        assert "SameSite=lax" in cookie
+
+        cookie_response = client.get("/api/daemons")
+
+    assert cookie_response.status_code == 200
 
 
 def test_http_responses_include_security_headers(monkeypatch) -> None:

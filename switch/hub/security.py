@@ -65,7 +65,7 @@ def _is_browser_authorized(
         return any(_token_matches(candidate, expected) for candidate in token_candidates)
     if os.environ.get(TRUST_PROXY_AUTH_ENV) == "1":
         return True
-    return _is_local_host(host) or _is_local_host(client_host)
+    return _is_local_host(host) and _is_local_host(client_host)
 
 
 def _token_matches(candidate: str | None, expected: str) -> bool:
@@ -90,7 +90,7 @@ def _cookie_value(header: str, key: str) -> str:
 def _is_local_host(value: str) -> bool:
     host = _strip_port(value).lower()
     return (
-        host in {"localhost", "testserver", "127.0.0.1", "::1", ""}
+        host in {"localhost", "testserver", "testclient", "127.0.0.1", "::1"}
         or host.startswith("127.")
     )
 

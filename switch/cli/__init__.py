@@ -121,6 +121,13 @@ def _hf_token(args: argparse.Namespace) -> str | None:
     return getattr(args, "hf_token", None) or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
 
+def _ui_auth_headers() -> dict[str, str]:
+    import os
+
+    token = os.environ.get("SWITCH_UI_TOKEN")
+    return {"X-Agentic-UI-Token": token} if token else {}
+
+
 def _daemon_name(args: argparse.Namespace) -> str:
     import platform
 
@@ -204,7 +211,7 @@ def _run_dev() -> None:
         import httpx
         for _ in range(30):
             try:
-                httpx.get("http://localhost:9341/api/daemons", timeout=1)
+                httpx.get("http://localhost:9341/api/daemons", timeout=1, headers=_ui_auth_headers())
                 break
             except Exception:
                 time.sleep(0.5)
@@ -312,7 +319,7 @@ def _run_hub(args: argparse.Namespace) -> None:
         nonlocal local_daemon_proc
         for _ in range(60):
             try:
-                httpx.get(f"{local_hub_url}/api/daemons", timeout=1)
+                httpx.get(f"{local_hub_url}/api/daemons", timeout=1, headers=_ui_auth_headers())
                 break
             except Exception:
                 time.sleep(0.5)

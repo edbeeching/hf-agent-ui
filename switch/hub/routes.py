@@ -3,12 +3,35 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from .security import require_browser_http, should_expose_host_token
+from .security import UI_TOKEN_COOKIE, UI_TOKEN_ENV, require_browser_http, should_expose_host_token
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http)])
+
+
+def _is_https_request(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return forwarded_proto == "https" or request.url.scheme == "https"
+
+
+@router.post("/auth/browser-cookie")
+async def set_browser_auth_cookie(request: Request, response: Response) -> dict[str, bool]:
+    ui_token = os.environ.get(UI_TOKEN_ENV)
+    if not ui_token:
+        response.delete_cookie(UI_TOKEN_COOKIE, path="/")
+        return {"cookie": False}
+
+    response.set_cookie(
+        UI_TOKEN_COOKIE,
+        ui_token,
+        httponly=True,
+        secure=_is_https_request(request),
+        samesite="lax",
+        path="/",
+    )
+    return {"cookie": True}
 
 
 @router.get("/hub")

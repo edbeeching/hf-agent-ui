@@ -112,10 +112,10 @@ export SWITCH_UI_TOKEN=<browser-token>
 switch hub --host 0.0.0.0
 ```
 
-Open the UI with the token once to store it in the browser:
+Open the UI with the token once. The fragment is not sent to the server; the app stores an HttpOnly browser cookie for API and WebSocket auth.
 
 ```text
-http://<hub-host>:9341/?uiToken=<browser-token>
+http://<hub-host>:9341/#uiToken=<browser-token>
 ```
 
 `--allow-insecure` can be used for trusted local-network experiments, but it exposes browser control of connected agent hosts.
