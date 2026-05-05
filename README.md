@@ -1,26 +1,26 @@
 ---
-title: Switch
+title: agentic-ui
 sdk: docker
 app_port: 7860
 ---
 
-# Switch
+# agentic-ui
 
-Web-based mission control for AI coding sessions. Manage Claude Code and Codex CLI sessions across multiple remote machines from a single browser tab.
+Web-based mission control for AI coding sessions. Manage Claude Code and Codex CLI sessions across multiple local, remote, and container agent hosts from a single browser tab.
 
 ## Architecture
 
 ```
-Browser <--WS--> Hub (FastAPI) <--WS--> Daemon (Python) <--stdio--> Claude / Codex CLI
+Browser <--WS--> Hub (FastAPI) <--WS--> Agent host (Python) <--stdio--> Claude / Codex CLI
 ```
 
-- **Hub** — central server, daemon registry, WebSocket relay, serves the web UI
-- **Daemon** — runs on each remote machine, wraps AI CLI tools, and connects outbound to the hub
+- **Hub** — central server, agent host registry, WebSocket relay, serves the web UI
+- **Agent host** — runs on each local, remote, or container machine, wraps AI CLI tools, and connects outbound to the hub
 
 ## Install
 
 ```bash
-uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/switch.git
+uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git
 ```
 
 To update:
@@ -35,18 +35,18 @@ switch update
 # Start the hub (serves the web UI on :9341)
 switch hub
 
-# Or start the hub with a local daemon for development/single-machine use
-switch hub --local-daemon
+# Or start the hub with a local agent host for development/single-machine use
+switch hub --local-agent-host
 
-# Start a daemon (on each machine)
-switch daemon --hub http://<hub-host>:9341
+# Start an agent host (on each machine)
+switch host --hub http://<hub-host>:9341
 
 # Open http://localhost:9341
 ```
 
 ## Hugging Face Space
 
-Switch can run as a private Docker Space. Configure the Space with:
+agentic-ui can run as a private Docker Space. Configure the Space with:
 
 ```yaml
 sdk: docker
@@ -59,17 +59,17 @@ Set a Space secret:
 SWITCH_DAEMON_TOKEN=<shared-secret>
 ```
 
-For private/internal Spaces, optionally expose the daemon token in the web UI copy command:
+For private/internal Spaces, optionally expose the agent host token in the web UI copy command:
 
 ```bash
 SWITCH_EXPOSE_DAEMON_TOKEN=1
 ```
 
-Then install and start daemons on remote machines:
+Then install and start agent hosts on remote machines:
 
 ```bash
-uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/switch.git
-SWITCH_DAEMON_TOKEN=<shared-secret> switch daemon --hub https://<space-subdomain>.hf.space
+uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git
+SWITCH_DAEMON_TOKEN=<shared-secret> switch host --hub https://<space-subdomain>.hf.space
 ```
 
 For private Spaces, also provide a Hugging Face access token via env:
@@ -77,7 +77,7 @@ For private Spaces, also provide a Hugging Face access token via env:
 ```bash
 export HF_TOKEN=<hf-token>
 export SWITCH_DAEMON_TOKEN=<shared-secret>
-switch daemon --hub https://<space-subdomain>.hf.space
+switch host --hub https://<space-subdomain>.hf.space
 ```
 
 ### Space Deploys
@@ -91,16 +91,17 @@ HF_TOKEN=<hf-write-token>
 ## CLI Reference
 
 ```
-switch hub     [-p PORT] [--host HOST] [--local-daemon] [-v]  Start the hub + web UI
-switch daemon  [--hub URL] [--token TOKEN] [--hf-token TOKEN] [-n NAME] [-v]  Start a daemon
-switch update                                                 Update to the latest version
+switch hub   [-p PORT] [--host HOST] [--local-agent-host] [-v]  Start the hub + web UI
+switch host  [--hub URL] [--token TOKEN] [--hf-token TOKEN] [-n NAME] [-v]  Start an agent host
+switch daemon                                                        Backward-compatible alias for switch host
+switch update                                                        Update to the latest version
 ```
 
 ## Development
 
 ```bash
-git clone git@github.com:edbeeching/switch.git
-cd switch
+git clone git@github.com:edbeeching/agentic-ui.git
+cd agentic-ui
 uv tool install --force --editable .
 ```
 
@@ -120,7 +121,7 @@ mkdir -p .worktrees
 git worktree add .worktrees/<name> -b <branch> origin/main
 ```
 
-The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to the repo, such as `../switch-main`, because those paths may sit outside an agent's writable workspace root.
+The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to the repo, such as `../agentic-ui-main`, because those paths may sit outside an agent's writable workspace root.
 
 ## Supported Tools
 

@@ -3,9 +3,35 @@ from __future__ import annotations
 import argparse
 import asyncio
 import subprocess
+import sys
 import threading
 
 from switch import cli
+
+
+def test_host_command_dispatches_to_agent_host_runner(monkeypatch) -> None:
+    calls = []
+
+    monkeypatch.setattr(sys, "argv", ["switch", "host", "--hub", "http://hub.example.test", "--name", "devbox"])
+    monkeypatch.setattr(cli, "_run_daemon", lambda args: calls.append(args))
+
+    cli.main()
+
+    assert len(calls) == 1
+    assert calls[0].hub == "http://hub.example.test"
+    assert calls[0].name == "devbox"
+
+
+def test_daemon_command_remains_backward_compatible(monkeypatch) -> None:
+    calls = []
+
+    monkeypatch.setattr(sys, "argv", ["switch", "daemon", "--hub", "http://hub.example.test"])
+    monkeypatch.setattr(cli, "_run_daemon", lambda args: calls.append(args))
+
+    cli.main()
+
+    assert len(calls) == 1
+    assert calls[0].hub == "http://hub.example.test"
 
 
 def test_display_host_for_daemons_uses_detected_ip_for_wildcard(monkeypatch) -> None:

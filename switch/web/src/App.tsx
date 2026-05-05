@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSwitch } from './hooks/useSwitch'
+import type { Daemon } from './hooks/useSwitch'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -24,7 +25,7 @@ function App() {
     subscribeSession,
   } = sw
   const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(() => readStoredSelection())
-  const [newSessionDaemonId, setNewSessionDaemonId] = useState<string | null>(null)
+  const [newSessionDaemonIds, setNewSessionDaemonIds] = useState<string[] | null>(null)
   const [recentWorkDirs, setRecentWorkDirs] = useState<string[]>(() => readRecentWorkDirs())
   const activeSelected = selected && daemons.some(daemon => daemon.id === selected.daemonId)
     && (sessions.get(selected.daemonId) || []).some(session => session.id === selected.sessionId)
@@ -32,9 +33,9 @@ function App() {
     : null
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
-  const newSessionDaemon = newSessionDaemonId
-    ? daemons.find(d => d.id === newSessionDaemonId)
-    : null
+  const newSessionDaemons = newSessionDaemonIds
+    ? newSessionDaemonIds.map(id => daemons.find(daemon => daemon.id === id)).filter((daemon): daemon is Daemon => Boolean(daemon))
+    : []
 
   useEffect(() => {
     if (!connected) return
@@ -58,7 +59,7 @@ function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="sidebar-title">
-          <h1>Switch</h1>
+          <h1>agentic-ui</h1>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
             {connected ? 'Connected' : 'Disconnected'}
           </span>
@@ -68,7 +69,7 @@ function App() {
           sessions={sessions}
           selectedSession={activeSelected}
           onSelectSession={(daemonId, sessionId) => setSelected({ daemonId, sessionId })}
-          onNewSession={daemonId => setNewSessionDaemonId(daemonId)}
+          onNewSession={daemons => setNewSessionDaemonIds(daemons.map(daemon => daemon.id))}
           onCloseSession={(daemonId, sessionId) => {
             removeSession(daemonId, sessionId)
             if (selected?.sessionId === sessionId) {
@@ -94,11 +95,11 @@ function App() {
         />
       </main>
 
-      {newSessionDaemon && (
+      {newSessionDaemons.length > 0 && (
         <NewSessionDialog
-          daemon={newSessionDaemon}
+          daemons={newSessionDaemons}
           recentWorkDirs={recentWorkDirs}
-          onClose={() => setNewSessionDaemonId(null)}
+          onClose={() => setNewSessionDaemonIds(null)}
           onCreate={(daemonId, workDir, tool, launch) => {
             setRecentWorkDirs(updateRecentWorkDirs(workDir))
             createPtySession(daemonId, workDir, tool, launch)
@@ -116,7 +117,7 @@ function ConnectDaemonPanel() {
   const [daemonHubUrl, setDaemonHubUrl] = useState(window.location.origin)
   const [daemonTokenRequired, setDaemonTokenRequired] = useState(false)
   const [daemonToken, setDaemonToken] = useState<string | null>(null)
-  const installCommand = 'uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/switch.git'
+  const installCommand = 'uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git'
   const daemonCommand = daemonLaunchCommand(daemonHubUrl, daemonTokenRequired, daemonToken)
 
   useEffect(() => {
@@ -165,8 +166,8 @@ function ConnectDaemonPanel() {
 
   return (
     <div className="connect-panel">
-      <div className="connect-panel-title">Connect a daemon</div>
-      <p>Install Switch from the private repo, then launch a daemon with this hub URL. For private Spaces, set HF_TOKEN in the shell first.</p>
+      <div className="connect-panel-title">Connect an agent host</div>
+      <p>Install agentic-ui from the private repo, then launch an agent host with this hub URL. For private Spaces, set HF_TOKEN in the shell first.</p>
       <CommandCopyRow
         label="Install"
         command={installCommand}
@@ -179,6 +180,14 @@ function ConnectDaemonPanel() {
         copied={copied === 'launch'}
         onCopy={() => copyCommand('launch', daemonCommand)}
       />
+      <button
+        type="button"
+        className="update-button"
+        disabled
+        title="Update from the Space UI will be enabled after the GitHub repo is public."
+      >
+        Update unavailable
+      </button>
     </div>
   )
 }
@@ -189,12 +198,12 @@ function daemonLaunchCommand(
   daemonToken: string | null,
 ): string {
   if (!daemonTokenRequired) {
-    return `switch daemon --hub ${daemonHubUrl}`
+    return `switch host --hub ${daemonHubUrl}`
   }
   if (daemonToken) {
-    return `switch daemon --hub ${daemonHubUrl} --token ${daemonToken}`
+    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}`
   }
-  return `SWITCH_DAEMON_TOKEN=<token> switch daemon --hub ${daemonHubUrl}`
+  return `SWITCH_DAEMON_TOKEN=<token> switch host --hub ${daemonHubUrl}`
 }
 
 function CommandCopyRow({

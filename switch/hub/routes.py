@@ -42,7 +42,7 @@ class RegisterRequest(BaseModel):
 async def register_daemon(req: RegisterRequest, request: Request) -> dict[str, Any]:
     raise HTTPException(
         status_code=410,
-        detail="HTTP daemon registration is no longer supported; use /daemon/ws",
+        detail="HTTP agent host registration is no longer supported; use /daemon/ws",
     )
 
 
@@ -50,7 +50,7 @@ async def register_daemon(req: RegisterRequest, request: Request) -> dict[str, A
 async def heartbeat(daemon_id: str, request: Request) -> dict[str, str]:
     registry = request.app.state.registry
     if not registry.heartbeat(daemon_id):
-        raise HTTPException(status_code=404, detail="Daemon not found")
+        raise HTTPException(status_code=404, detail="Agent host not found")
     return {"status": "ok"}
 
 

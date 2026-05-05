@@ -6,7 +6,7 @@ interface Props {
   sessions: Map<string, SessionInfo[]>
   selectedSession: { daemonId: string; sessionId: string } | null
   onSelectSession: (daemonId: string, sessionId: string) => void
-  onNewSession: (daemonId: string) => void
+  onNewSession: (daemons: Daemon[]) => void
   onCloseSession: (daemonId: string, sessionId: string) => void
   onPauseSession: (daemonId: string, sessionId: string) => void
   onResumeSession: (daemonId: string, sessionId: string) => void
@@ -73,22 +73,22 @@ export function DaemonList({
   return (
     <div className="daemon-list">
       <div className="daemon-list-header">
-        <h2>Daemons</h2>
+        <h2>Agent hosts</h2>
       </div>
       {daemons.length === 0 && (
-        <div className="daemon-list-empty">No daemons connected</div>
+        <div className="daemon-list-empty">No agent hosts connected</div>
       )}
       {groupedDaemons.map(environment => (
         <div key={environment.key} className="environment-group">
           <div className="environment-header">
             <span>{environment.label}</span>
+            <EnvironmentNewSessionButton environment={environment} onNewSession={onNewSession} />
           </div>
           {[...environment.projects.values()].map(project => (
             <div key={`${environment.key}-${project.name}`} className="project-group">
               <div className="project-header">
                 <span className="project-name">{project.name}</span>
                 <span className="project-count">{countProjectSessions(project)}</span>
-                <ProjectNewSessionButton project={project} onNewSession={onNewSession} />
               </div>
               <ProjectSection
                 project={project}
@@ -127,21 +127,22 @@ export function DaemonList({
   )
 }
 
-function ProjectNewSessionButton({
-  project,
+function EnvironmentNewSessionButton({
+  environment,
   onNewSession,
 }: {
-  project: ProjectGroup
-  onNewSession: (daemonId: string) => void
+  environment: EnvironmentGroup
+  onNewSession: (daemons: Daemon[]) => void
 }) {
-  const daemon = [...project.daemons.values()].find(entry => entry.connected) || [...project.daemons.values()][0]
-  if (!daemon) return null
+  const daemons = environmentDaemons(environment).filter(daemon => daemon.connected)
+  const disabled = daemons.length === 0
 
   return (
     <button
-      className="btn-icon project-action"
-      onClick={() => onNewSession(daemon.id)}
-      title={`New session on ${daemon.name}`}
+      className="btn-icon environment-action"
+      disabled={disabled}
+      onClick={() => onNewSession(daemons)}
+      title={disabled ? `No connected agent hosts in ${environment.label}` : `New session on ${environment.label} agent host`}
     >
       +
     </button>
@@ -314,4 +315,14 @@ function projectNameFromPath(path: string): string {
 
 function countProjectSessions(project: ProjectGroup): number {
   return project.sessions.length
+}
+
+function environmentDaemons(environment: EnvironmentGroup): Daemon[] {
+  const daemons = new Map<string, Daemon>()
+  for (const project of environment.projects.values()) {
+    for (const daemon of project.daemons.values()) {
+      daemons.set(daemon.id, daemon)
+    }
+  }
+  return [...daemons.values()]
 }

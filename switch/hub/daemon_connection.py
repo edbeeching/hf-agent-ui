@@ -14,7 +14,7 @@ MessageCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
 
 
 class DaemonConnection:
-    """A daemon-held WebSocket connection to the hub."""
+    """An agent-host-held WebSocket connection to the hub."""
 
     def __init__(self, daemon: DaemonInfo, ws: WebSocket, on_message: MessageCallback) -> None:
         self.daemon = daemon
@@ -66,7 +66,7 @@ class DaemonConnectionPool:
             name = self._daemon_name(register_payload)
             duplicate = self._connected_daemon_by_name(name)
             if duplicate:
-                await _send_error(ws, f"Daemon name already connected: {name}")
+                await _send_error(ws, f"Agent host name already connected: {name}")
                 return
             daemon = self._register(register_payload, name)
             conn = DaemonConnection(daemon, ws, self._on_message)
@@ -76,7 +76,7 @@ class DaemonConnectionPool:
                 "daemonId": daemon.id,
                 "name": daemon.name,
             })
-            logger.info("Daemon %s connected over outbound WebSocket", daemon.name)
+            logger.info("Agent host %s connected over outbound WebSocket", daemon.name)
             await conn.run()
         except (json.JSONDecodeError, ValueError) as exc:
             await _send_error(ws, str(exc))
@@ -86,12 +86,12 @@ class DaemonConnectionPool:
             if daemon and self._connections.get(daemon.id) is conn:
                 self._connections.pop(daemon.id, None)
                 self.registry.remove(daemon.id)
-                logger.info("Daemon %s disconnected", daemon.name)
+                logger.info("Agent host %s disconnected", daemon.name)
 
     async def send(self, daemon_id: str, data: dict[str, Any]) -> None:
         conn = self._connections.get(daemon_id)
         if not conn:
-            raise RuntimeError(f"No connection to daemon {daemon_id}")
+            raise RuntimeError(f"No connection to agent host {daemon_id}")
         await conn.send(data)
 
     def is_connected(self, daemon_id: str) -> bool:

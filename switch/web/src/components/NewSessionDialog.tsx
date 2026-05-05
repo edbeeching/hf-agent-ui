@@ -4,7 +4,7 @@ import type { Daemon, LaunchMode, LaunchOptions } from '../hooks/useSwitch'
 const CUSTOM_LAUNCH_STORAGE_KEY = 'switch.customLaunch'
 
 interface Props {
-  daemon: Daemon
+  daemons: Daemon[]
   recentWorkDirs: string[]
   onClose: () => void
   onCreate: (
@@ -15,8 +15,10 @@ interface Props {
   ) => void
 }
 
-export function NewSessionDialog({ daemon, recentWorkDirs, onClose, onCreate }: Props) {
+export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }: Props) {
+  const defaultDaemonId = daemons.find(daemon => daemon.connected)?.id || daemons[0]?.id || ''
   const storedCustomLaunch = readCustomLaunch()
+  const [daemonId, setDaemonId] = useState(defaultDaemonId)
   const [tool, setTool] = useState('claude')
   const [workDir, setWorkDir] = useState(recentWorkDirs[0] || '~')
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
@@ -37,15 +39,32 @@ export function NewSessionDialog({ daemon, recentWorkDirs, onClose, onCreate }: 
         command: launch.launchCommand || '',
       })
     }
-    onCreate(daemon.id, workDir, tool, launch)
+    onCreate(daemonId, workDir, tool, launch)
     onClose()
   }
+
+  const selectedDaemon = daemons.find(daemon => daemon.id === daemonId)
+  const title = daemons.length === 1 && selectedDaemon
+    ? `New Session on ${selectedDaemon.name}`
+    : 'New Session'
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog" onClick={e => e.stopPropagation()}>
-        <h3>New Session on {daemon.name}</h3>
+        <h3>{title}</h3>
         <form onSubmit={handleSubmit}>
+          {daemons.length > 1 && (
+            <label>
+              Agent host
+              <select value={daemonId} onChange={e => setDaemonId(e.target.value)}>
+                {daemons.map(daemon => (
+                  <option key={daemon.id} value={daemon.id}>
+                    {daemon.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Tool
             <select value={tool} onChange={e => setTool(e.target.value)}>

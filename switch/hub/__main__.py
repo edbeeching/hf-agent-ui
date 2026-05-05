@@ -10,7 +10,7 @@ import uvicorn
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="switch-hub",
-        description="Switch hub — central server for AI session multiplexing",
+        description="agentic-ui hub — central server for AI session multiplexing",
     )
     parser.add_argument(
         "-p", "--port",
@@ -36,7 +36,7 @@ def main() -> None:
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[switch-hub] %(asctime)s %(levelname)s %(message)s",
+        format="[agentic-ui hub] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
 

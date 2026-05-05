@@ -1,4 +1,4 @@
-# Switch — User Stories
+# agentic-ui — User Stories
 
 ## 1. Solo developer, single machine
 
@@ -6,14 +6,14 @@
 
 ```bash
 # Install
-uv tool install git+ssh://git@github.com/edbeeching/switch.git
+uv tool install git+ssh://git@github.com/edbeeching/agentic-ui.git
 
 # Start everything
 switch hub &
-switch daemon &
+switch host &
 
 # Open http://localhost:9341
-# Click "+" next to the daemon → select "Claude Code" → set working dir → Create
+# Click "+" next to the environment → select "Claude Code" → set working dir → Create
 # Type a message in the input bar → see streaming response
 ```
 
@@ -31,7 +31,7 @@ Sidebar:
     ● [codex]  ~/work/infra          ← Codex fixing Terraform configs
 ```
 
-Click any session to see its conversation. Switch between them instantly. Each session runs independently — Claude Code in two of them, Codex in the third.
+Click any session to see its conversation. Move between them instantly. Each session runs independently — Claude Code in two of them, Codex in the third.
 
 ---
 
@@ -44,19 +44,19 @@ Click any session to see its conversation. Switch between them instantly. Each s
 switch hub
 
 # On the remote server — install and connect back
-uv tool install git+ssh://git@github.com/edbeeching/switch.git
-switch daemon --hub http://your-laptop:9341 --name gpu-server
+uv tool install git+ssh://git@github.com/edbeeching/agentic-ui.git
+switch host --hub http://your-laptop:9341 --name gpu-server
 ```
 
 ```
 Sidebar:
   local (laptop)
-    ● [claude] ~/work/switch
+    ● [claude] ~/work/agentic-ui
   gpu-server (ml-box)
     ● [claude] ~/experiments/train    ← running on the remote machine
 ```
 
-Both daemons appear in the same dashboard. You create sessions on either machine from the same browser tab.
+Both agent hosts appear in the same dashboard. You create sessions on either machine from the same browser tab.
 
 ---
 
@@ -70,11 +70,11 @@ switch hub
 
 # Inside the container
 pip install uv  # or however you get uv in there
-uv tool install git+ssh://git@github.com/edbeeching/switch.git
-switch daemon --hub http://host.docker.internal:9341 --name my-container
+uv tool install git+ssh://git@github.com/edbeeching/agentic-ui.git
+switch host --hub http://host.docker.internal:9341 --name my-container
 ```
 
-The container's daemon registers with your host's hub. You create sessions that run inside the container's filesystem.
+The container's agent host registers with your host's hub. You create sessions that run inside the container's filesystem.
 
 ---
 
@@ -95,7 +95,7 @@ Create two sessions on the same working directory — one Claude Code, one Codex
 
 ## 6. Dev workflow with hot reload
 
-**Scenario:** You're actively developing Switch itself and want instant feedback.
+**Scenario:** You're actively developing agentic-ui itself and want instant feedback.
 
 ```bash
 # One command starts everything with hot reload
@@ -104,10 +104,10 @@ switch dev
 # Or manually:
 switch hub --dev    # Python auto-reload via uvicorn
 cd switch/web && npm run dev   # Frontend hot reload via Vite
-switch daemon
+switch host
 
-# Or run the hub with a local daemon attached:
-switch hub --local-daemon
+# Or run the hub with a local agent host attached:
+switch hub --local-agent-host
 ```
 
 - Edit Python files → hub auto-restarts
@@ -118,15 +118,15 @@ switch hub --local-daemon
 
 ## 7. Team setup (future)
 
-**Scenario:** Your team shares a central hub. Each developer runs a daemon on their machine.
+**Scenario:** Your team shares a central hub. Each developer runs an agent host on their machine.
 
 ```bash
 # Ops: deploy the hub on a shared server
 switch hub --host 0.0.0.0 --port 9341
 
 # Each developer:
-switch daemon --hub http://hub.internal:9341 --name alice-laptop
-switch daemon --hub http://hub.internal:9341 --name bob-workstation
+switch host --hub http://hub.internal:9341 --name alice-laptop
+switch host --hub http://hub.internal:9341 --name bob-workstation
 ```
 
 ```
@@ -144,12 +144,12 @@ Everyone sees all sessions. (Auth not yet implemented — single-user trust mode
 
 ## 8. Self-updating
 
-**Scenario:** A new version of Switch is pushed to the repo.
+**Scenario:** A new version of agentic-ui is pushed to the repo.
 
 ```bash
 switch update
 # → pulls latest from GitHub, reinstalls the tool
-# Restart hub/daemon to pick up changes
+# Restart hub/agent host to pick up changes
 ```
 
 ---
@@ -157,28 +157,28 @@ switch update
 ## Interaction flow (what happens under the hood)
 
 ```
-1. User clicks "+" on a daemon in the sidebar
+1. User clicks "+" next to an environment in the sidebar
 2. Browser sends:  { type: "pty.create", daemonId, workDir, tool: "claude" }
-3. Hub relays to daemon via WebSocket
-4. Daemon spawns: claude in a pseudo-terminal
-5. Daemon subscribes hub to session events
+3. Hub relays to the agent host via WebSocket
+4. Agent host spawns: claude in a pseudo-terminal
+5. Agent host subscribes hub to session events
 6. Hub sends back: { type: "pty.created", session: { id, status, tool, mode: "pty", ... } }
 7. Session appears in sidebar
 
 8. User types into the xterm terminal
 9. Browser sends:  { type: "pty.input", daemonId, sessionId, data }
-10. Hub relays to daemon
-11. Daemon writes keystrokes to the PTY
-12. Claude/Codex streams terminal output → daemon emits pty.output → hub relays to browser
+10. Hub relays to the agent host
+11. Agent host writes keystrokes to the PTY
+12. Claude/Codex streams terminal output → agent host emits pty.output → hub relays to browser
 13. Browser renders the full TUI in xterm
-14. If the agent needs approval/auth/confirmation, daemon emits session.input_required and the sidebar marks the session
-15. When the user types into that session, daemon emits session.input_resolved and the marker clears
+14. If the agent needs approval/auth/confirmation, agent host emits session.input_required and the sidebar marks the session
+15. When the user types into that session, agent host emits session.input_resolved and the marker clears
 
-16. If the browser refreshes, it sends session.list to each daemon and restores live sessions in the sidebar
-17. When the user selects a restored session, browser sends session.subscribe and daemon returns recent ptyOutput for replay
+16. If the browser refreshes, it sends session.list to each agent host and restores live sessions in the sidebar
+17. When the user selects a restored session, browser sends session.subscribe and the agent host returns recent ptyOutput for replay
 
 18. User clicks stop on the session
 19. Browser sends:  { type: "session.stop", daemonId, sessionId }
-20. Daemon sends SIGTERM to Claude process
+20. Agent host sends SIGTERM to Claude process
 21. Session exits, status updates to "stopped"
 ```
