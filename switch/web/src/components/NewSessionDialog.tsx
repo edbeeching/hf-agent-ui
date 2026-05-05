@@ -16,7 +16,8 @@ interface Props {
 }
 
 export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }: Props) {
-  const defaultDaemonId = daemons.find(daemon => daemon.connected)?.id || daemons[0]?.id || ''
+  const connectedDaemons = daemons.filter(daemon => daemon.connected)
+  const defaultDaemonId = connectedDaemons[0]?.id || ''
   const storedCustomLaunch = readCustomLaunch()
   const [daemonId, setDaemonId] = useState(defaultDaemonId)
   const [tool, setTool] = useState('claude')
@@ -25,9 +26,16 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
   const [launchCommand, setLaunchCommand] = useState(storedCustomLaunch.command)
   const [error, setError] = useState<string | null>(null)
+  const selectedDaemonId = connectedDaemons.some(daemon => daemon.id === daemonId)
+    ? daemonId
+    : defaultDaemonId
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!selectedDaemonId) {
+      setError('Selected agent host is no longer available.')
+      return
+    }
     const launch = launchOptions(launchMode, launchLabel, launchCommand)
     if (launch.launchMode === 'custom' && !launch.launchCommand?.includes('{command}')) {
       setError('Custom launch command must include {command}.')
@@ -39,12 +47,12 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
         command: launch.launchCommand || '',
       })
     }
-    onCreate(daemonId, workDir, tool, launch)
+    onCreate(selectedDaemonId, workDir, tool, launch)
     onClose()
   }
 
-  const selectedDaemon = daemons.find(daemon => daemon.id === daemonId)
-  const title = daemons.length === 1 && selectedDaemon
+  const selectedDaemon = connectedDaemons.find(daemon => daemon.id === selectedDaemonId)
+  const title = connectedDaemons.length === 1 && selectedDaemon
     ? `New Session on ${selectedDaemon.name}`
     : 'New Session'
 
@@ -53,11 +61,11 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
       <div className="dialog" onClick={e => e.stopPropagation()}>
         <h3>{title}</h3>
         <form onSubmit={handleSubmit}>
-          {daemons.length > 1 && (
+          {connectedDaemons.length > 1 && (
             <label>
               Agent host
-              <select value={daemonId} onChange={e => setDaemonId(e.target.value)}>
-                {daemons.map(daemon => (
+              <select value={selectedDaemonId} onChange={e => setDaemonId(e.target.value)}>
+                {connectedDaemons.map(daemon => (
                   <option key={daemon.id} value={daemon.id}>
                     {daemon.name}
                   </option>
@@ -136,7 +144,7 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
           {error && <div className="dialog-error">{error}</div>}
           <div className="dialog-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit">Create</button>
+            <button type="submit" disabled={!selectedDaemon}>Create</button>
           </div>
         </form>
       </div>
