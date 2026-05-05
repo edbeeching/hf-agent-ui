@@ -204,3 +204,14 @@ def test_http_responses_include_security_headers(monkeypatch) -> None:
     assert response.headers["x-frame-options"] == "DENY"
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
     assert response.headers["referrer-policy"] == "no-referrer"
+
+
+def test_hf_space_responses_allow_huggingface_embed(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+
+    with TestClient(app, base_url="https://edbeeching-agentic-ui.hf.space") as client:
+        response = client.get("/api/hub")
+
+    assert response.status_code == 200
+    assert "x-frame-options" not in response.headers
+    assert "frame-ancestors https://huggingface.co" in response.headers["content-security-policy"]
