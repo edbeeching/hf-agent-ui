@@ -16,6 +16,9 @@ COPY switch ./switch
 COPY --from=web /app/switch/web/dist ./switch/hub/static
 
 RUN pip install --no-cache-dir .
+RUN useradd --create-home --shell /usr/sbin/nologin appuser \
+    && chown -R appuser:appuser /app
 
 EXPOSE 7860
+USER appuser
 CMD ["python", "-m", "uvicorn", "switch.hub.app:app", "--host", "0.0.0.0", "--port", "7860"]

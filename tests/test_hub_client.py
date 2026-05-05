@@ -23,7 +23,20 @@ def test_auth_headers_use_hf_token() -> None:
     assert _auth_headers("hf-token") == {"Authorization": "Bearer hf-token"}
 
 
-def test_auth_headers_do_not_use_switch_token() -> None:
+def test_auth_headers_use_host_token_header() -> None:
+    assert _auth_headers(None, host_token="host-secret") == {
+        "X-Agentic-UI-Host-Token": "host-secret",
+    }
+
+
+def test_auth_headers_include_both_hf_and_host_tokens() -> None:
+    assert _auth_headers("hf-token", host_token="host-secret") == {
+        "Authorization": "Bearer hf-token",
+        "X-Agentic-UI-Host-Token": "host-secret",
+    }
+
+
+def test_auth_headers_are_none_without_tokens() -> None:
     assert _auth_headers(None) is None
 
 

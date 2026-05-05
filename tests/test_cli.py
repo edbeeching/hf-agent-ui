@@ -34,6 +34,19 @@ def test_daemon_command_remains_backward_compatible(monkeypatch) -> None:
     assert calls[0].hub == "http://hub.example.test"
 
 
+def test_hub_command_defaults_to_loopback(monkeypatch) -> None:
+    calls = []
+
+    monkeypatch.setattr(sys, "argv", ["switch", "hub"])
+    monkeypatch.setattr(cli, "_run_hub", lambda args: calls.append(args))
+
+    cli.main()
+
+    assert len(calls) == 1
+    assert calls[0].host == "127.0.0.1"
+    assert calls[0].allow_insecure is False
+
+
 def test_display_host_for_daemons_uses_detected_ip_for_wildcard(monkeypatch) -> None:
     monkeypatch.setattr(cli, "_detect_reachable_ip", lambda: "192.168.1.50")
 
@@ -86,6 +99,7 @@ def test_run_hub_does_not_kill_port(monkeypatch) -> None:
         local_daemon=False,
         daemon_port=9340,
         daemon_name="local",
+        allow_insecure=True,
     ))
 
     assert calls
@@ -147,6 +161,7 @@ def test_run_hub_can_launch_local_daemon(monkeypatch) -> None:
         local_daemon=True,
         daemon_port=9440,
         daemon_name="dev-local",
+        allow_insecure=True,
     ))
 
     assert popen_calls
@@ -161,6 +176,58 @@ def test_run_hub_can_launch_local_daemon(monkeypatch) -> None:
     assert "--verbose" in cmd
     assert kwargs["start_new_session"] is True
     assert killpg_calls == [(12345, 15)]
+
+
+def test_run_hub_refuses_public_bind_without_auth(monkeypatch, capsys) -> None:
+    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
+    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+
+    try:
+        cli._run_hub(argparse.Namespace(
+            port=9341,
+            host="0.0.0.0",
+            verbose=False,
+            dev=False,
+            local_daemon=False,
+            daemon_port=9340,
+            daemon_name="local",
+            allow_insecure=False,
+        ))
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected SystemExit")
+
+    assert "refusing to bind" in capsys.readouterr().err
+
+
+def test_run_hub_allows_public_bind_with_ui_token(monkeypatch) -> None:
+    class FakeTimer:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+    import uvicorn
+
+    calls = []
+    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.setattr(threading, "Timer", FakeTimer)
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    cli._run_hub(argparse.Namespace(
+        port=9341,
+        host="0.0.0.0",
+        verbose=False,
+        dev=False,
+        local_daemon=False,
+        daemon_port=9340,
+        daemon_name="local",
+        allow_insecure=False,
+    ))
+
+    assert calls
 
 
 def test_run_daemon_does_not_kill_port_by_default(monkeypatch) -> None:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
+from collections import defaultdict, deque
 import json
 import logging
-from typing import Any
+from typing import Any, Deque
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -40,6 +40,8 @@ class WsRelay:
     def __init__(self, pool: DaemonConnectionPool) -> None:
         self.pool = pool
         self._clients: set[WebSocket] = set()
+        self._session_subscribers: dict[tuple[str, str], set[WebSocket]] = defaultdict(set)
+        self._pending_requests: dict[tuple[str, str], Deque[WebSocket]] = defaultdict(deque)
 
     async def handle_browser(self, ws: WebSocket) -> None:
         await ws.accept()
@@ -58,6 +60,7 @@ class WsRelay:
             logger.info("Browser disconnected")
         finally:
             self._clients.discard(ws)
+            self._remove_client(ws)
 
     async def _handle_browser_message(self, ws: WebSocket, req: dict[str, Any]) -> None:
         daemon_id = req.get("daemonId")
@@ -65,6 +68,8 @@ class WsRelay:
             await self._send_to_browser(ws, {"type": "error", "message": "Missing daemonId"})
             return
 
+        daemon_id = str(daemon_id)
+        self._track_browser_request(ws, daemon_id, req)
         # Forward to daemon, stripping daemonId (daemon doesn't need it)
         daemon_msg = {k: v for k, v in req.items() if k != "daemonId"}
         try:
@@ -80,20 +85,101 @@ class WsRelay:
         """Called by the connection pool when a daemon sends a message."""
         # Inject daemonId so browser knows which daemon it came from
         msg["daemonId"] = daemon_id
-        logger.debug("relay to %d browsers: %s", len(self._clients), msg.get("type", "?"))
-        # Broadcast to all connected browsers
-        await self._broadcast(msg)
+        targets = self._targets_for_daemon_message(daemon_id, msg)
+        logger.debug("relay to %d browsers: %s", len(targets), msg.get("type", "?"))
+        await self._send_to_targets(targets, msg)
 
-    async def _broadcast(self, data: dict[str, Any]) -> None:
+    async def _send_to_targets(self, targets: set[WebSocket], data: dict[str, Any]) -> None:
         payload = json.dumps(data, default=str)
         disconnected = []
-        for ws in self._clients:
+        for ws in targets:
             try:
                 await ws.send_text(payload)
             except Exception:
                 disconnected.append(ws)
         for ws in disconnected:
             self._clients.discard(ws)
+            self._remove_client(ws)
+
+    def _track_browser_request(self, ws: WebSocket, daemon_id: str, req: dict[str, Any]) -> None:
+        msg_type = req.get("type")
+        session_id = req.get("sessionId")
+
+        if msg_type == "pty.create":
+            self._pending_requests[(daemon_id, "pty.create")].append(ws)
+            return
+
+        if msg_type in {"session.list", "app.pause", "app.resume"}:
+            self._pending_requests[(daemon_id, "session.list")].append(ws)
+            return
+
+        if isinstance(session_id, str) and session_id:
+            self._session_subscribers[(daemon_id, session_id)].add(ws)
+
+    def _targets_for_daemon_message(self, daemon_id: str, msg: dict[str, Any]) -> set[WebSocket]:
+        msg_type = msg.get("type")
+        session_id = _session_id(msg)
+
+        if msg_type == "pty.started":
+            target = self._peek_pending(daemon_id, "pty.create")
+            if target and session_id:
+                self._session_subscribers[(daemon_id, session_id)].add(target)
+                return {target}
+            return set()
+
+        if msg_type == "pty.created":
+            target = self._pop_pending(daemon_id, "pty.create")
+            created_session_id = _session_id(msg)
+            if target and created_session_id:
+                self._session_subscribers[(daemon_id, created_session_id)].add(target)
+            return {target} if target else set()
+
+        if msg_type == "session.list":
+            target = self._pop_pending(daemon_id, "session.list")
+            return {target} if target else set()
+
+        if msg_type == "session.subscribed":
+            if session_id:
+                return set(self._session_subscribers.get((daemon_id, session_id), set()))
+            return set()
+
+        if msg_type == "error":
+            request_type = msg.get("requestType")
+            if isinstance(request_type, str):
+                target = self._pop_pending(daemon_id, request_type)
+                if target:
+                    return {target}
+
+        if session_id:
+            return set(self._session_subscribers.get((daemon_id, session_id), set()))
+        return set()
+
+    def _pop_pending(self, daemon_id: str, request_type: str) -> WebSocket | None:
+        pending = self._pending_requests.get((daemon_id, request_type))
+        while pending:
+            ws = pending.popleft()
+            if ws in self._clients:
+                return ws
+        return None
+
+    def _peek_pending(self, daemon_id: str, request_type: str) -> WebSocket | None:
+        pending = self._pending_requests.get((daemon_id, request_type))
+        while pending:
+            ws = pending[0]
+            if ws in self._clients:
+                return ws
+            pending.popleft()
+        return None
+
+    def _remove_client(self, ws: WebSocket) -> None:
+        for subscribers in self._session_subscribers.values():
+            subscribers.discard(ws)
+        for pending in self._pending_requests.values():
+            try:
+                while True:
+                    pending.remove(ws)
+            except ValueError:
+                pass
 
     @staticmethod
     async def _send_to_browser(ws: WebSocket, data: dict[str, Any]) -> None:
@@ -101,3 +187,15 @@ class WsRelay:
             await ws.send_text(json.dumps(data, default=str))
         except Exception:
             pass
+
+
+def _session_id(msg: dict[str, Any]) -> str | None:
+    session_id = msg.get("sessionId")
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    session = msg.get("session")
+    if isinstance(session, dict):
+        nested = session.get("id")
+        if isinstance(nested, str) and nested:
+            return nested
+    return None

@@ -34,7 +34,7 @@ switch update
 ## Quick Start
 
 ```bash
-# Start the hub (serves the web UI on :9341)
+# Start the hub on localhost (serves the web UI on :9341)
 switch hub
 
 # Or start the hub with a local agent host for development/single-machine use
@@ -61,10 +61,16 @@ Set a Space secret:
 SWITCH_DAEMON_TOKEN=<shared-secret>
 ```
 
-For private/internal Spaces, optionally expose the agent host token in the web UI copy command:
+Set a Space variable so agentic-ui trusts Hugging Face's private Space access control for the browser UI:
 
 ```bash
-SWITCH_EXPOSE_DAEMON_TOKEN=1
+SWITCH_TRUST_PROXY_AUTH=1
+```
+
+For private/internal single-user Spaces only, you can optionally expose the agent host token in the web UI copy command:
+
+```bash
+SWITCH_UNSAFE_EXPOSE_HOST_TOKEN=1
 ```
 
 Then install and start agent hosts on remote machines:
@@ -93,11 +99,26 @@ HF_TOKEN=<hf-write-token>
 ## CLI Reference
 
 ```
-switch hub   [-p PORT] [--host HOST] [--local-agent-host] [-v]  Start the hub + web UI
+switch hub   [-p PORT] [--host HOST] [--local-agent-host] [--allow-insecure] [-v]  Start the hub + web UI
 switch host  [--hub URL] [--token TOKEN] [--hf-token TOKEN] [-n NAME] [-v]  Start an agent host
 switch daemon                                                        Backward-compatible alias for switch host
 switch update                                                        Update to the latest version
 ```
+
+By default `switch hub` binds to `127.0.0.1`. To expose the hub on a network interface, configure browser auth first:
+
+```bash
+export SWITCH_UI_TOKEN=<browser-token>
+switch hub --host 0.0.0.0
+```
+
+Open the UI with the token once to store it in the browser:
+
+```text
+http://<hub-host>:9341/?uiToken=<browser-token>
+```
+
+`--allow-insecure` can be used for trusted local-network experiments, but it exposes browser control of connected agent hosts.
 
 ## Development
 

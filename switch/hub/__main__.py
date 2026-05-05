@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 
 import uvicorn
+
+from switch.cli import _has_browser_auth_configured, _is_public_bind_host
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,13 +23,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--host",
-        default=os.environ.get("SWITCH_HUB_HOST", "0.0.0.0"),
-        help="Host to bind to (default: 0.0.0.0, env: SWITCH_HUB_HOST)",
+        default=os.environ.get("SWITCH_HUB_HOST", "127.0.0.1"),
+        help="Host to bind to (default: 127.0.0.1, env: SWITCH_HUB_HOST)",
     )
     parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Enable debug logging",
+    )
+    parser.add_argument(
+        "--allow-insecure",
+        action="store_true",
+        help="Allow a network-reachable hub without SWITCH_UI_TOKEN",
     )
     return parser.parse_args()
 
@@ -40,8 +48,15 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
+    if _is_public_bind_host(args.host) and not _has_browser_auth_configured() and not args.allow_insecure:
+        print(
+            "Error: refusing to bind a hub to a network-reachable address without browser auth.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     uvicorn.run(
-        "switch_hub.app:app",
+        "switch.hub.app:app",
         host=args.host,
         port=args.port,
         log_level="debug" if args.verbose else "info",
