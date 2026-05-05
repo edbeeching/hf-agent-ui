@@ -40,7 +40,7 @@ async def _on_daemon_message(app: FastAPI, daemon_id: str, msg: dict) -> None:
     await relay.on_daemon_message(daemon_id, msg)
 
 
-app = FastAPI(title="Switch Hub", lifespan=lifespan)
+app = FastAPI(title="agentic-ui Hub", lifespan=lifespan)
 
 app.include_router(router)
 

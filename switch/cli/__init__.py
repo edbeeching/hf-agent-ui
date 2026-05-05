@@ -7,7 +7,7 @@ import sys
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="switch",
-        description="Switch — AI session multiplexer for Claude Code and Codex",
+        description="agentic-ui — browser control for Claude Code and Codex sessions",
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -17,30 +17,30 @@ def main() -> None:
     hub_p.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
     hub_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
     hub_p.add_argument("--dev", action="store_true", help="Dev mode: auto-reload on Python changes, use Vite for frontend")
-    hub_p.add_argument("--local-daemon", action="store_true", help="Also launch a local daemon for this hub")
-    hub_p.add_argument("--daemon-port", type=int, default=9340, help="Local daemon port with --local-daemon (default: 9340)")
-    hub_p.add_argument("--daemon-name", default="local", help="Local daemon name with --local-daemon (default: local)")
+    hub_p.add_argument("--local-agent-host", "--local-daemon", dest="local_daemon", action="store_true", help="Also launch a local agent host for this hub")
+    hub_p.add_argument("--agent-host-port", "--daemon-port", dest="daemon_port", type=int, default=9340, help="Local agent host port with --local-agent-host (default: 9340)")
+    hub_p.add_argument("--agent-host-name", "--daemon-name", dest="daemon_name", default="local", help="Local agent host name with --local-agent-host (default: local)")
 
-    # --- daemon ---
-    daemon_p = sub.add_parser("daemon", help="Start a daemon on this machine")
+    # --- agent host ---
+    daemon_p = sub.add_parser("host", aliases=["daemon"], help="Start an agent host on this machine")
     daemon_p.add_argument("-p", "--port", type=int, default=9340, help="Deprecated; ignored in outbound mode")
     daemon_p.add_argument("--hub", default="http://localhost:9341", help="Hub URL (default: http://localhost:9341)")
-    daemon_p.add_argument("--token", default=None, help="Daemon auth token (env: SWITCH_DAEMON_TOKEN)")
+    daemon_p.add_argument("--token", default=None, help="Agent host auth token (env: SWITCH_DAEMON_TOKEN)")
     daemon_p.add_argument("--hf-token", default=None, help="Hugging Face token for private Spaces (env: HF_TOKEN)")
     daemon_p.add_argument("-n", "--name", default=None, help="Display name (default: hostname)")
     daemon_p.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
 
     # --- dev ---
-    sub.add_parser("dev", help="Start hub + daemon + frontend dev server (all-in-one)")
+    sub.add_parser("dev", help="Start hub + agent host + frontend dev server (all-in-one)")
 
     # --- update ---
-    sub.add_parser("update", help="Update switch to the latest version")
+    sub.add_parser("update", help="Update agentic-ui to the latest version")
 
     args = parser.parse_args()
 
     if args.command == "hub":
         _run_hub(args)
-    elif args.command == "daemon":
+    elif args.command in {"host", "daemon"}:
         _run_daemon(args)
     elif args.command == "dev":
         _run_dev()
@@ -51,7 +51,7 @@ def main() -> None:
         sys.exit(1)
 
 
-REPO_URL = "git+ssh://git@github.com/edbeeching/switch.git"
+REPO_URL = "git+ssh://git@github.com/edbeeching/agentic-ui.git"
 
 
 def _detect_reachable_ip() -> str | None:
@@ -79,7 +79,7 @@ def _detect_reachable_ip() -> str | None:
 
 
 def _display_host_for_daemons(bind_host: str) -> str:
-    """Return the host to show in `switch daemon --hub ...` instructions."""
+    """Return the host to show in `switch host --hub ...` instructions."""
     if bind_host in {"0.0.0.0", "::"}:
         return _detect_reachable_ip() or "localhost"
     return bind_host
@@ -93,7 +93,7 @@ def _display_host_for_browser(bind_host: str) -> str:
 
 
 def _local_hub_url(bind_host: str, port: int) -> str:
-    """Return the hub URL a daemon process on the same machine should use."""
+    """Return the hub URL an agent host process on the same machine should use."""
     return f"http://{_display_host_for_browser(bind_host)}:{port}"
 
 
@@ -147,7 +147,7 @@ def _run_update() -> None:
         print("Error: uv not found on PATH", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Updating switch from {REPO_URL} ...")
+    print(f"Updating agentic-ui from {REPO_URL} ...")
     subprocess.run(
         [uv, "tool", "install", "--force", "--reinstall", REPO_URL],
         check=True,
@@ -170,7 +170,7 @@ def _run_dev() -> None:
         sys.exit(1)
 
     if not (web_dir / "node_modules").exists():
-        print("[switch dev] Installing frontend dependencies...")
+        print("[agentic-ui dev] Installing frontend dependencies...")
         subprocess.run(["npm", "install"], cwd=web_dir, check=True)
 
     # Kill stale processes on our ports
@@ -187,7 +187,7 @@ def _run_dev() -> None:
              "--host", "0.0.0.0", "--port", "9341", "--reload", "--reload-dir", "switch"],
             start_new_session=True,
         ))
-        # Wait for hub to be ready before starting daemon
+        # Wait for hub to be ready before starting the agent host
         import time
         import httpx
         for _ in range(30):
@@ -196,7 +196,7 @@ def _run_dev() -> None:
                 break
             except Exception:
                 time.sleep(0.5)
-        # Daemon
+        # Agent host
         procs.append(subprocess.Popen(
             [sys.executable, "-c",
              "from switch.cli import _run_daemon; import argparse; "
@@ -211,8 +211,8 @@ def _run_dev() -> None:
             start_new_session=True,
         ))
 
-        print("[switch dev] Starting hub (:9341), daemon, and frontend (:5173)")
-        print("[switch dev] Press Ctrl+C to stop all")
+        print("[agentic-ui dev] Starting hub (:9341), agent host, and frontend (:5173)")
+        print("[agentic-ui dev] Press Ctrl+C to stop all")
 
         import webbrowser
         import time as _time
@@ -229,7 +229,7 @@ def _run_dev() -> None:
             time.sleep(0.5)
 
     except KeyboardInterrupt:
-        print("\n[switch dev] Stopping...")
+        print("\n[agentic-ui dev] Stopping...")
         for p in procs:
             try:
                 os.killpg(os.getpgid(p.pid), signal.SIGTERM)
@@ -255,7 +255,7 @@ def _run_hub(args: argparse.Namespace) -> None:
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[switch hub] %(asctime)s %(levelname)s %(message)s",
+        format="[agentic-ui hub] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
 
@@ -267,20 +267,20 @@ def _run_hub(args: argparse.Namespace) -> None:
     local_daemon_lock = threading.Lock()
 
     print()
-    print(f"  [switch hub] To connect daemons:")
-    print(f"    switch daemon --hub {daemon_url}")
+    print(f"  [agentic-ui hub] To connect agent hosts:")
+    print(f"    switch host --hub {daemon_url}")
     print()
     if args.dev:
         os.environ["SWITCH_DEV"] = "1"
-        print(f"  [switch hub] Dev mode — Python auto-reload enabled")
-        print(f"  [switch hub] Run 'cd switch/web && npm run dev' for frontend hot reload")
-        print(f"  [switch hub] Open http://localhost:5173")
+        print(f"  [agentic-ui hub] Dev mode — Python auto-reload enabled")
+        print(f"  [agentic-ui hub] Run 'cd switch/web && npm run dev' for frontend hot reload")
+        print(f"  [agentic-ui hub] Open http://localhost:5173")
     else:
-        print(f"  [switch hub] Open {browser_url}")
+        print(f"  [agentic-ui hub] Open {browser_url}")
         if daemon_url != browser_url:
-            print(f"  [switch hub] Network URL {daemon_url}")
+            print(f"  [agentic-ui hub] Network URL {daemon_url}")
     if args.local_daemon:
-        print(f"  [switch hub] Local daemon will start on :{args.daemon_port} as '{args.daemon_name}'")
+        print(f"  [agentic-ui hub] Local agent host will start on :{args.daemon_port} as '{args.daemon_name}'")
     print()
 
     import webbrowser
@@ -296,7 +296,7 @@ def _run_hub(args: argparse.Namespace) -> None:
             except Exception:
                 time.sleep(0.5)
         else:
-            print(f"  [switch hub] Local daemon was not started because {local_hub_url} did not become ready", file=sys.stderr)
+            print(f"  [agentic-ui hub] Local agent host was not started because {local_hub_url} did not become ready", file=sys.stderr)
             return
 
         cmd = [
@@ -314,7 +314,7 @@ def _run_hub(args: argparse.Namespace) -> None:
             cmd.append("--verbose")
         with local_daemon_lock:
             local_daemon_proc = subprocess.Popen(cmd, start_new_session=True)
-        print(f"  [switch hub] Started local daemon pid={local_daemon_proc.pid}")
+        print(f"  [agentic-ui hub] Started local agent host pid={local_daemon_proc.pid}")
 
     def stop_local_daemon() -> None:
         with local_daemon_lock:
@@ -358,7 +358,7 @@ def _run_daemon(args: argparse.Namespace) -> None:
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[switch daemon] %(asctime)s %(levelname)s %(message)s",
+        format="[agentic-ui host] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
     logger = logging.getLogger(__name__)

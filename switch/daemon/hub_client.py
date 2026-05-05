@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class HubDaemonClient:
-    """Maintains the daemon's outbound WebSocket connection to the hub."""
+    """Maintains the agent host's outbound WebSocket connection to the hub."""
 
     def __init__(
         self,
@@ -57,7 +57,7 @@ class HubDaemonClient:
         ws_url = _daemon_ws_url(self.hub_url, query_token=self.token)
         headers = _auth_headers(self.hf_token)
         if _is_hf_space_url(self.hub_url) and not self.hf_token and not self._warned_missing_hf_token:
-            logger.warning("Private Hugging Face Spaces require HF_TOKEN or --hf-token for daemon connections")
+            logger.warning("Private Hugging Face Spaces require HF_TOKEN or --hf-token for agent host connections")
             self._warned_missing_hf_token = True
         logger.info("Connecting to hub at %s", _daemon_ws_url(self.hub_url))
 
@@ -69,7 +69,7 @@ class HubDaemonClient:
             }))
             registered = json.loads(await ws.recv())
             if registered.get("type") != "daemon.registered":
-                raise RuntimeError(f"Hub rejected daemon registration: {registered}")
+                raise RuntimeError(f"Hub rejected agent host registration: {registered}")
             logger.info("Registered with hub as %s (id=%s)", self.daemon_name, registered.get("daemonId"))
 
             handler = DaemonWsServer(self.manager, port=0)

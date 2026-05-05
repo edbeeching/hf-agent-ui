@@ -88,7 +88,7 @@ def test_daemon_ws_rejects_duplicate_active_name(monkeypatch) -> None:
                 rejected = second_ws.receive_json()
                 assert rejected == {
                     "type": "error",
-                    "message": "Daemon name already connected: remote",
+                    "message": "Agent host name already connected: remote",
                 }
 
             daemons = client.get("/api/daemons").json()

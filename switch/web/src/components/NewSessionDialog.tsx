@@ -4,7 +4,7 @@ import type { Daemon, LaunchMode, LaunchOptions } from '../hooks/useSwitch'
 const CUSTOM_LAUNCH_STORAGE_KEY = 'switch.customLaunch'
 
 interface Props {
-  daemon: Daemon
+  daemons: Daemon[]
   recentWorkDirs: string[]
   onClose: () => void
   onCreate: (
@@ -15,17 +15,27 @@ interface Props {
   ) => void
 }
 
-export function NewSessionDialog({ daemon, recentWorkDirs, onClose, onCreate }: Props) {
+export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }: Props) {
+  const connectedDaemons = daemons.filter(daemon => daemon.connected)
+  const defaultDaemonId = connectedDaemons[0]?.id || ''
   const storedCustomLaunch = readCustomLaunch()
+  const [daemonId, setDaemonId] = useState(defaultDaemonId)
   const [tool, setTool] = useState('claude')
   const [workDir, setWorkDir] = useState(recentWorkDirs[0] || '~')
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
   const [launchCommand, setLaunchCommand] = useState(storedCustomLaunch.command)
   const [error, setError] = useState<string | null>(null)
+  const selectedDaemonId = connectedDaemons.some(daemon => daemon.id === daemonId)
+    ? daemonId
+    : defaultDaemonId
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!selectedDaemonId) {
+      setError('Selected agent host is no longer available.')
+      return
+    }
     const launch = launchOptions(launchMode, launchLabel, launchCommand)
     if (launch.launchMode === 'custom' && !launch.launchCommand?.includes('{command}')) {
       setError('Custom launch command must include {command}.')
@@ -37,15 +47,32 @@ export function NewSessionDialog({ daemon, recentWorkDirs, onClose, onCreate }: 
         command: launch.launchCommand || '',
       })
     }
-    onCreate(daemon.id, workDir, tool, launch)
+    onCreate(selectedDaemonId, workDir, tool, launch)
     onClose()
   }
+
+  const selectedDaemon = connectedDaemons.find(daemon => daemon.id === selectedDaemonId)
+  const title = connectedDaemons.length === 1 && selectedDaemon
+    ? `New Session on ${selectedDaemon.name}`
+    : 'New Session'
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog" onClick={e => e.stopPropagation()}>
-        <h3>New Session on {daemon.name}</h3>
+        <h3>{title}</h3>
         <form onSubmit={handleSubmit}>
+          {connectedDaemons.length > 1 && (
+            <label>
+              Agent host
+              <select value={selectedDaemonId} onChange={e => setDaemonId(e.target.value)}>
+                {connectedDaemons.map(daemon => (
+                  <option key={daemon.id} value={daemon.id}>
+                    {daemon.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Tool
             <select value={tool} onChange={e => setTool(e.target.value)}>
@@ -117,7 +144,7 @@ export function NewSessionDialog({ daemon, recentWorkDirs, onClose, onCreate }: 
           {error && <div className="dialog-error">{error}</div>}
           <div className="dialog-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit">Create</button>
+            <button type="submit" disabled={!selectedDaemon}>Create</button>
           </div>
         </form>
       </div>

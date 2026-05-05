@@ -8,7 +8,7 @@ def test_daemon_ws_url_uses_ws_for_http() -> None:
 
 
 def test_daemon_ws_url_uses_wss_for_https() -> None:
-    assert _daemon_ws_url("https://switch-space.hf.space") == "wss://switch-space.hf.space/daemon/ws"
+    assert _daemon_ws_url("https://agentic-ui-space.hf.space") == "wss://agentic-ui-space.hf.space/daemon/ws"
 
 
 def test_daemon_ws_url_preserves_base_path() -> None:
@@ -28,5 +28,5 @@ def test_auth_headers_do_not_use_switch_token() -> None:
 
 
 def test_is_hf_space_url() -> None:
-    assert _is_hf_space_url("https://edbeeching-switch.hf.space")
-    assert not _is_hf_space_url("https://huggingface.co/spaces/edbeeching/switch")
+    assert _is_hf_space_url("https://edbeeching-agentic-ui.hf.space")
+    assert not _is_hf_space_url("https://huggingface.co/spaces/edbeeching/agentic-ui")

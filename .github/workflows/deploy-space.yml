@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      HF_SPACE_ID: edbeeching/switch
+      HF_SPACE_ID: edbeeching/agentic-ui
 
     steps:
       - name: Checkout CI commit
@@ -89,7 +89,7 @@ jobs:
               allow_patterns=managed_patterns,
               delete_patterns=managed_patterns,
               ignore_patterns=ignored_patterns,
-              commit_message=f"Deploy switch {sha[:7]}",
+              commit_message=f"Deploy agentic-ui {sha[:7]}",
               commit_description=(
                   f"Source: {server}/{repo}/commit/{sha}\n"
                   f"Run: {server}/{repo}/actions/runs/{run_id}\n"

@@ -17,8 +17,8 @@ def default_daemon_name(args: argparse.Namespace) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="switch-daemon",
-        description="Switch daemon — wraps AI coding sessions (Claude Code, Codex) on this machine",
+        prog="switch host",
+        description="agentic-ui agent host — wraps AI coding sessions (Claude Code, Codex) on this machine",
     )
     parser.add_argument(
         "-p", "--port",
@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--token",
         default=os.environ.get("SWITCH_DAEMON_TOKEN"),
-        help="Daemon auth token (env: SWITCH_DAEMON_TOKEN)",
+        help="Agent host auth token (env: SWITCH_DAEMON_TOKEN)",
     )
     parser.add_argument(
         "--hf-token",
@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-n", "--name",
         default=os.environ.get("SWITCH_DAEMON_NAME"),
-        help="Daemon display name (default: hostname, env: SWITCH_DAEMON_NAME)",
+        help="Agent host display name (default: hostname, env: SWITCH_DAEMON_NAME)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -59,7 +59,7 @@ async def run(args: argparse.Namespace) -> None:
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[switch-daemon] %(asctime)s %(levelname)s %(message)s",
+        format="[agentic-ui host] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
     logger = logging.getLogger(__name__)
