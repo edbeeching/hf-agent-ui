@@ -2,6 +2,8 @@
 title: agentic-ui
 sdk: docker
 app_port: 7860
+fullWidth: true
+header: mini
 ---
 
 # agentic-ui

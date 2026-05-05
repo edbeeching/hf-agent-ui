@@ -9,9 +9,10 @@ interface Props {
   onInput: (data: string) => void
   onResize: (cols: number, rows: number) => void
   output: string[]
+  visible?: boolean
 }
 
-export function TerminalView({ sessionId, onInput, onResize, output }: Props) {
+export function TerminalView({ sessionId, onInput, onResize, output, visible = true }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -33,7 +34,7 @@ export function TerminalView({ sessionId, onInput, onResize, output }: Props) {
 
     const term = new Terminal({
       cursorBlink: true,
-      fontSize: 13,
+      fontSize: terminalFontSize(),
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace",
       theme: {
         background: '#0d1117',
@@ -77,7 +78,10 @@ export function TerminalView({ sessionId, onInput, onResize, output }: Props) {
     })
 
     // Window resize
-    const handleResize = () => fitAddon.fit()
+    const handleResize = () => {
+      term.options.fontSize = terminalFontSize()
+      fitAddon.fit()
+    }
     window.addEventListener('resize', handleResize)
     const observer = new ResizeObserver(handleResize)
     observer.observe(containerRef.current)
@@ -105,6 +109,12 @@ export function TerminalView({ sessionId, onInput, onResize, output }: Props) {
     writtenRef.current = output.length
   }, [output])
 
+  useEffect(() => {
+    if (!visible || !fitRef.current) return
+    const frame = window.requestAnimationFrame(() => fitRef.current?.fit())
+    return () => window.cancelAnimationFrame(frame)
+  }, [visible, sessionId])
+
   if (!sessionId) {
     return (
       <div className="session-view-empty">
@@ -120,4 +130,8 @@ export function TerminalView({ sessionId, onInput, onResize, output }: Props) {
       style={{ flex: 1, padding: 4, background: '#0d1117' }}
     />
   )
+}
+
+function terminalFontSize(): number {
+  return window.matchMedia('(max-width: 760px)').matches ? 12 : 13
 }

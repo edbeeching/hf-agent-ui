@@ -9,6 +9,7 @@ import './App.css'
 const SELECTED_SESSION_STORAGE_KEY = 'switch.selectedSession'
 const RECENT_WORK_DIRS_STORAGE_KEY = 'switch.recentWorkDirs'
 const MAX_RECENT_WORK_DIRS = 8
+type MobileView = 'terminal' | 'sessions' | 'connect'
 
 function App() {
   const sw = useSwitch()
@@ -27,6 +28,7 @@ function App() {
   const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(() => readStoredSelection())
   const [newSessionDaemonIds, setNewSessionDaemonIds] = useState<string[] | null>(null)
   const [recentWorkDirs, setRecentWorkDirs] = useState<string[]>(() => readRecentWorkDirs())
+  const [activeMobileView, setActiveMobileView] = useState<MobileView>('terminal')
   const activeSelected = selected && daemons.some(daemon => daemon.id === selected.daemonId)
     && (sessions.get(selected.daemonId) || []).some(session => session.id === selected.sessionId)
     ? selected
@@ -57,7 +59,7 @@ function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
           <h1>agentic-ui</h1>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
@@ -68,7 +70,10 @@ function App() {
           daemons={daemons}
           sessions={sessions}
           selectedSession={activeSelected}
-          onSelectSession={(daemonId, sessionId) => setSelected({ daemonId, sessionId })}
+          onSelectSession={(daemonId, sessionId) => {
+            setSelected({ daemonId, sessionId })
+            setActiveMobileView('terminal')
+          }}
           onNewSession={daemons => setNewSessionDaemonIds(daemons.map(daemon => daemon.id))}
           onCloseSession={(daemonId, sessionId) => {
             removeSession(daemonId, sessionId)
@@ -82,10 +87,11 @@ function App() {
         <ConnectDaemonPanel />
       </aside>
 
-      <main className="main-panel">
+      <main className={`main-panel ${activeMobileView === 'terminal' ? 'mobile-active' : ''}`}>
         <TerminalView
           sessionId={activeSelected?.sessionId || ''}
           output={selectedPtyOutput}
+          visible={activeMobileView === 'terminal'}
           onInput={data => {
             if (activeSelected) sendPtyInput(activeSelected.daemonId, activeSelected.sessionId, data)
           }}
@@ -95,6 +101,37 @@ function App() {
         />
       </main>
 
+      <section className={`mobile-connect-panel ${activeMobileView === 'connect' ? 'mobile-active' : ''}`}>
+        <ConnectDaemonPanel />
+      </section>
+
+      <nav className="mobile-tabbar" aria-label="Mobile navigation">
+        <button
+          type="button"
+          className={activeMobileView === 'terminal' ? 'active' : ''}
+          aria-current={activeMobileView === 'terminal' ? 'page' : undefined}
+          onClick={() => setActiveMobileView('terminal')}
+        >
+          Terminal
+        </button>
+        <button
+          type="button"
+          className={activeMobileView === 'sessions' ? 'active' : ''}
+          aria-current={activeMobileView === 'sessions' ? 'page' : undefined}
+          onClick={() => setActiveMobileView('sessions')}
+        >
+          Sessions
+        </button>
+        <button
+          type="button"
+          className={activeMobileView === 'connect' ? 'active' : ''}
+          aria-current={activeMobileView === 'connect' ? 'page' : undefined}
+          onClick={() => setActiveMobileView('connect')}
+        >
+          Connect
+        </button>
+      </nav>
+
       {newSessionDaemons.length > 0 && (
         <NewSessionDialog
           daemons={newSessionDaemons}
@@ -103,6 +140,7 @@ function App() {
           onCreate={(daemonId, workDir, tool, launch) => {
             setRecentWorkDirs(updateRecentWorkDirs(workDir))
             createPtySession(daemonId, workDir, tool, launch)
+            setActiveMobileView('terminal')
           }}
         />
       )}
