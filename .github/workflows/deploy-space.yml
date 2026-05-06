@@ -15,13 +15,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: hf-space-deploy-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  group: hf-space-deploy-${{ github.event.workflow_run.event || github.event_name }}-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   deploy:
     name: Upload Space
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push'
+        )
+      }}
     runs-on: ubuntu-latest
 
     steps:
