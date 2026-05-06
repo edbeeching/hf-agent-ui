@@ -10,6 +10,7 @@ import './App.css'
 const SELECTED_SESSION_STORAGE_KEY = 'switch.selectedSession'
 const RECENT_WORK_DIRS_STORAGE_KEY = 'switch.recentWorkDirs'
 const MAX_RECENT_WORK_DIRS = 8
+const SHOW_CLOUD_HOSTS = false
 type MobileView = 'terminal' | 'sessions' | 'connect'
 
 function App() {
@@ -206,7 +207,6 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
   return (
     <div className="connect-panel">
       <div className="connect-panel-title">Connect an agent host</div>
-      <p>Install agentic-ui from the private repo, then launch an agent host with this hub URL. For private Spaces, set HF_TOKEN in the shell first.</p>
       <CommandCopyRow
         label="Install"
         command={installCommand}
@@ -227,7 +227,7 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
       >
         Update unavailable
       </button>
-      <HfCloudHostPanel daemons={daemons} />
+      {SHOW_CLOUD_HOSTS && <HfCloudHostPanel daemons={daemons} />}
     </div>
   )
 }
@@ -500,9 +500,9 @@ function daemonLaunchCommand(
     return `switch host --hub ${daemonHubUrl}`
   }
   if (daemonToken) {
-    return `SWITCH_DAEMON_TOKEN=${daemonToken} switch host --hub ${daemonHubUrl}`
+    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}`
   }
-  return `SWITCH_DAEMON_TOKEN=<token> switch host --hub ${daemonHubUrl}`
+  return `switch host --hub ${daemonHubUrl} --token <token>`
 }
 
 function CommandCopyRow({
