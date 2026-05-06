@@ -12,6 +12,8 @@ For local use, `switch hub` binds to `127.0.0.1` by default. For network use, co
 
 Custom launch commands intentionally execute shell commands on the selected agent host. Treat them as arbitrary code execution by the authenticated UI user.
 
+Cloud agent hosts launched through Hugging Face Jobs receive server-side secrets needed to connect back to the hub. Only enable this feature for trusted-admin hubs and use tokens scoped for the intended namespace.
+
 ## Reporting a Vulnerability
 
 Before public release, report vulnerabilities directly to the repository owner. After public release, use GitHub private vulnerability reporting if it is enabled for the repository.

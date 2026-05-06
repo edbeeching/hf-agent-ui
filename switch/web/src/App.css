@@ -536,6 +536,191 @@
   font-size: 11px;
 }
 
+.cloud-host-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #30363d;
+}
+
+.cloud-warning,
+.cloud-status {
+  margin: 6px 0;
+  color: #d29922;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.cloud-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cloud-grid label {
+  min-width: 0;
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cloud-grid span {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.cloud-grid input,
+.cloud-grid select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 6px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  box-sizing: border-box;
+  background: #161b22;
+  color: #e6edf3;
+  font: inherit;
+  font-size: 11px;
+}
+
+.cloud-grid input:focus,
+.cloud-grid select:focus {
+  outline: none;
+  border-color: #1f6feb;
+}
+
+.cloud-primary-button {
+  width: 100%;
+  height: 30px;
+  margin-top: 8px;
+  border: 1px solid #238636;
+  border-radius: 4px;
+  background: #238636;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cloud-primary-button:disabled {
+  border-color: #30363d;
+  background: #161b22;
+  color: #6e7681;
+  cursor: default;
+}
+
+.cloud-job-list {
+  margin-top: 8px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.cloud-job-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 8px;
+  border-top: 1px solid #30363d;
+  background: #161b22;
+}
+
+.cloud-job-row:first-child {
+  border-top: 0;
+}
+
+.cloud-job-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.cloud-job-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #8b949e;
+}
+
+.cloud-job-dot.running,
+.cloud-job-dot.completed {
+  background: #3fb950;
+}
+
+.cloud-job-dot.scheduling,
+.cloud-job-dot.pending,
+.cloud-job-dot.cancelling {
+  background: #d29922;
+}
+
+.cloud-job-dot.failed,
+.cloud-job-dot.error,
+.cloud-job-dot.timeout,
+.cloud-job-dot.cancelled {
+  background: #f85149;
+}
+
+.cloud-job-id {
+  min-width: 0;
+  overflow: hidden;
+  color: #e6edf3;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-connected {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #238636;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cloud-job-meta {
+  grid-column: 1;
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  color: #8b949e;
+  font-size: 10px;
+}
+
+.cloud-job-actions {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cloud-job-actions a,
+.cloud-job-actions button {
+  height: 24px;
+  min-width: 34px;
+  padding: 0 7px;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #21262d;
+  color: #e6edf3;
+  font: inherit;
+  font-size: 10px;
+  line-height: 22px;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.cloud-job-actions button:disabled {
+  color: #6e7681;
+  cursor: default;
+}
+
 .mobile-connect-panel,
 .mobile-tabbar {
   display: none;
@@ -703,9 +888,25 @@
   }
 
   .copy-button,
-  .update-button {
+  .update-button,
+  .cloud-primary-button {
     height: 44px;
     font-size: 12px;
+  }
+
+  .cloud-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .cloud-grid input,
+  .cloud-grid select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .cloud-job-row {
+    padding: 10px;
   }
 
   .mobile-tabbar {

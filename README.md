@@ -88,6 +88,27 @@ export SWITCH_DAEMON_TOKEN=<shared-secret>
 switch host --hub https://<space-subdomain>.hf.space
 ```
 
+### Cloud Agent Hosts
+
+The Space UI can launch an agent host as a Hugging Face Job. Configure Space secrets:
+
+```bash
+HF_TOKEN=<hf-token-with-job-read-write>
+SWITCH_DAEMON_TOKEN=<shared-secret>
+```
+
+Optional Space variables:
+
+```bash
+SWITCH_HF_SPACE_REPO_ID=edbeeching/agentic-ui
+SWITCH_HF_JOBS_NAMESPACE=edbeeching
+SWITCH_HF_JOBS_DEFAULT_IMAGE=python:3.12
+SWITCH_HF_JOBS_DEFAULT_FLAVOR=cpu-basic
+SWITCH_HF_JOBS_DEFAULT_TIMEOUT=2h
+```
+
+The default image installs agentic-ui from the private Space repo and connects back to the hub. Images used for real sessions must also include the Claude or Codex CLI and any credentials those tools require.
+
 ### Space Deploys
 
 The GitHub workflow `Deploy HF Space` uploads `main` to the private Space after CI passes. Configure a GitHub Actions repository secret with write access to the Space:

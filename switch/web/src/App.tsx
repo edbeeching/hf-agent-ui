@@ -85,7 +85,7 @@ function App() {
           onPauseSession={(daemonId, sessionId) => sw.pauseSession(daemonId, sessionId)}
           onResumeSession={(daemonId, sessionId) => sw.resumeSession(daemonId, sessionId)}
         />
-        <ConnectDaemonPanel />
+        <ConnectDaemonPanel daemons={daemons} />
       </aside>
 
       <main className={`main-panel ${activeMobileView === 'terminal' ? 'mobile-active' : ''}`}>
@@ -103,7 +103,7 @@ function App() {
       </main>
 
       <section className={`mobile-connect-panel ${activeMobileView === 'connect' ? 'mobile-active' : ''}`}>
-        <ConnectDaemonPanel />
+        <ConnectDaemonPanel daemons={daemons} />
       </section>
 
       <nav className="mobile-tabbar" aria-label="Mobile navigation">
@@ -151,7 +151,7 @@ function App() {
 
 export default App
 
-function ConnectDaemonPanel() {
+function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
   const [copied, setCopied] = useState<string | null>(null)
   const [daemonHubUrl, setDaemonHubUrl] = useState(window.location.origin)
   const [daemonTokenRequired, setDaemonTokenRequired] = useState(false)
@@ -227,8 +227,268 @@ function ConnectDaemonPanel() {
       >
         Update unavailable
       </button>
+      <HfCloudHostPanel daemons={daemons} />
     </div>
   )
+}
+
+interface HfCloudConfig {
+  enabled: boolean
+  missingConfig: string[]
+  defaults: {
+    image: string
+    flavor: string
+    timeout: string
+    spaceRepoId: string
+    namespace: string | null
+  }
+}
+
+interface HfHardware {
+  name: string
+  prettyName: string
+  cpu: string | null
+  ram: string | null
+  unitCostUsd: number | null
+  unitLabel: string | null
+  accelerator: {
+    type: string | null
+    model: string | null
+    quantity: string | null
+    vram: string | null
+    manufacturer: string | null
+  } | null
+}
+
+interface HfCloudJob {
+  id: string
+  url: string | null
+  stage: string
+  message: string | null
+  createdAt: string | null
+  image: string | null
+  flavor: string | null
+  daemonName: string | null
+}
+
+function HfCloudHostPanel({ daemons }: { daemons: Daemon[] }) {
+  const [config, setConfig] = useState<HfCloudConfig | null>(null)
+  const [hardware, setHardware] = useState<HfHardware[]>([])
+  const [jobs, setJobs] = useState<HfCloudJob[]>([])
+  const [image, setImage] = useState('python:3.12')
+  const [flavor, setFlavor] = useState('cpu-basic')
+  const [timeout, setTimeoutValue] = useState('2h')
+  const [name, setName] = useState('')
+  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let disposed = false
+
+    async function loadConfig() {
+      try {
+        const res = await uiAuthFetch('/api/cloud/hf/config')
+        const payload = await res.json() as HfCloudConfig
+        if (disposed) return
+        setConfig(payload)
+        setImage(payload.defaults.image)
+        setFlavor(payload.defaults.flavor)
+        setTimeoutValue(payload.defaults.timeout)
+      } catch {
+        if (!disposed) setStatus('HF Jobs config unavailable')
+      }
+    }
+
+    loadConfig()
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!config?.enabled) return
+    let disposed = false
+
+    async function loadHardware() {
+      try {
+        const res = await uiAuthFetch('/api/cloud/hf/hardware')
+        if (!res.ok) throw new Error(await errorText(res))
+        const payload = await res.json() as HfHardware[]
+        if (!disposed) setHardware(payload)
+      } catch {
+        if (!disposed) setHardware([])
+      }
+    }
+
+    loadHardware()
+    return () => {
+      disposed = true
+    }
+  }, [config?.enabled])
+
+  useEffect(() => {
+    if (!config?.enabled) return
+    let disposed = false
+
+    async function loadJobs() {
+      try {
+        const res = await uiAuthFetch('/api/cloud/hf/jobs')
+        if (!res.ok) throw new Error(await errorText(res))
+        const payload = await res.json() as HfCloudJob[]
+        if (!disposed) setJobs(payload)
+      } catch {
+        if (!disposed) setStatus('HF Jobs status unavailable')
+      }
+    }
+
+    loadJobs()
+    const interval = window.setInterval(loadJobs, 5000)
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+    }
+  }, [config?.enabled])
+
+  async function launchJob() {
+    setBusy(true)
+    setStatus(null)
+    try {
+      const res = await uiAuthFetch('/api/cloud/hf/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image,
+          flavor,
+          timeout,
+          name: name.trim() || undefined,
+        }),
+      })
+      if (!res.ok) throw new Error(await errorText(res))
+      const job = await res.json() as HfCloudJob
+      setJobs(current => [job, ...current.filter(existing => existing.id !== job.id)])
+      setStatus(`Launched ${job.id}`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'HF Jobs launch failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function cancelJob(jobId: string) {
+    setStatus(null)
+    try {
+      const res = await uiAuthFetch(`/api/cloud/hf/jobs/${encodeURIComponent(jobId)}/cancel`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error(await errorText(res))
+      setStatus(`Stopping ${jobId}`)
+      setJobs(current => current.map(job => job.id === jobId ? { ...job, stage: 'CANCELLING' } : job))
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'HF Jobs stop failed')
+    }
+  }
+
+  const enabled = Boolean(config?.enabled)
+  const missing = config?.missingConfig || []
+
+  return (
+    <div className="cloud-host-panel">
+      <div className="connect-panel-title">Cloud host</div>
+      {!enabled && (
+        <div className="cloud-warning">
+          Missing {missing.length ? missing.join(', ') : 'HF Jobs config'}
+        </div>
+      )}
+      <div className="cloud-grid">
+        <label>
+          <span>Image</span>
+          <input value={image} onChange={event => setImage(event.target.value)} disabled={!enabled || busy} />
+        </label>
+        <label>
+          <span>Hardware</span>
+          <select value={flavor} onChange={event => setFlavor(event.target.value)} disabled={!enabled || busy}>
+            <option value={flavor}>{flavor}</option>
+            {hardware
+              .filter(item => item.name !== flavor)
+              .map(item => (
+                <option key={item.name} value={item.name}>
+                  {hardwareLabel(item)}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          <span>Timeout</span>
+          <input value={timeout} onChange={event => setTimeoutValue(event.target.value)} disabled={!enabled || busy} />
+        </label>
+        <label>
+          <span>Name</span>
+          <input value={name} onChange={event => setName(event.target.value)} placeholder="auto" disabled={!enabled || busy} />
+        </label>
+      </div>
+      <button type="button" className="cloud-primary-button" disabled={!enabled || busy} onClick={launchJob}>
+        {busy ? 'Launching...' : 'Launch cloud host'}
+      </button>
+      {status && <div className="cloud-status">{status}</div>}
+      {jobs.length > 0 && (
+        <div className="cloud-job-list">
+          {jobs.slice(0, 5).map(job => (
+            <CloudJobRow key={job.id} job={job} daemons={daemons} onCancel={cancelJob} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CloudJobRow({
+  job,
+  daemons,
+  onCancel,
+}: {
+  job: HfCloudJob
+  daemons: Daemon[]
+  onCancel: (jobId: string) => void
+}) {
+  const connected = Boolean(job.daemonName && daemons.some(daemon => daemon.name === job.daemonName && daemon.connected))
+  const terminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'ERROR'].includes(job.stage)
+  return (
+    <div className="cloud-job-row">
+      <div className="cloud-job-main">
+        <span className={`cloud-job-dot ${job.stage.toLowerCase()}`} />
+        <span className="cloud-job-id" title={job.id}>{job.daemonName || job.id}</span>
+        {connected && <span className="cloud-connected">connected</span>}
+      </div>
+      <div className="cloud-job-meta">
+        <span>{job.stage.toLowerCase()}</span>
+        {job.flavor && <span>{job.flavor}</span>}
+      </div>
+      <div className="cloud-job-actions">
+        {job.url && (
+          <a href={job.url} target="_blank" rel="noreferrer" title="Open HF Job">
+            HF
+          </a>
+        )}
+        <button type="button" disabled={terminal} onClick={() => onCancel(job.id)}>
+          Stop
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function hardwareLabel(item: HfHardware): string {
+  const accelerator = item.accelerator ? ` · ${item.accelerator.model || item.accelerator.type}` : ''
+  return `${item.name}${accelerator}`
+}
+
+async function errorText(response: Response): Promise<string> {
+  try {
+    const data = await response.json() as { detail?: unknown }
+    return typeof data.detail === 'string' ? data.detail : response.statusText
+  } catch {
+    return response.statusText
+  }
 }
 
 function daemonLaunchCommand(
