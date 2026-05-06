@@ -116,9 +116,9 @@ def _daemon_token(args: argparse.Namespace) -> str | None:
 
 
 def _hf_token(args: argparse.Namespace) -> str | None:
-    import os
+    from switch.hf_auth import resolve_hf_token
 
-    return getattr(args, "hf_token", None) or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    return resolve_hf_token(getattr(args, "hf_token", None))
 
 
 def _ui_auth_headers() -> dict[str, str]:

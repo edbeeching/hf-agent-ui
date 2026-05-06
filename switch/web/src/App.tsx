@@ -496,13 +496,22 @@ function daemonLaunchCommand(
   daemonTokenRequired: boolean,
   daemonToken: string | null,
 ): string {
+  const hfTokenArg = isHfSpaceUrl(daemonHubUrl) ? ' --hf-token "$HF_TOKEN"' : ''
   if (!daemonTokenRequired) {
-    return `switch host --hub ${daemonHubUrl}`
+    return `switch host --hub ${daemonHubUrl}${hfTokenArg}`
   }
   if (daemonToken) {
-    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}`
+    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}${hfTokenArg}`
   }
-  return `switch host --hub ${daemonHubUrl} --token <token>`
+  return `switch host --hub ${daemonHubUrl} --token <token>${hfTokenArg}`
+}
+
+function isHfSpaceUrl(value: string): boolean {
+  try {
+    return new URL(value).hostname.endsWith('.hf.space')
+  } catch {
+    return false
+  }
 }
 
 function CommandCopyRow({

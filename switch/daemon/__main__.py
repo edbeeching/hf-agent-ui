@@ -7,6 +7,8 @@ import os
 import platform
 import signal
 
+from switch.hf_auth import resolve_hf_token
+
 from .hub_client import HubDaemonClient
 from .session_manager import SessionManager
 
@@ -38,8 +40,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--hf-token",
-        default=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"),
-        help="Hugging Face token for private Spaces (env: HF_TOKEN)",
+        default=None,
+        help="Hugging Face token for private Spaces (env: HF_TOKEN, or local HF login cache)",
     )
     parser.add_argument(
         "-n", "--name",
@@ -65,7 +67,7 @@ async def run(args: argparse.Namespace) -> None:
     logger = logging.getLogger(__name__)
 
     manager = SessionManager()
-    client = HubDaemonClient(manager, args.hub, name, token=args.token, hf_token=args.hf_token)
+    client = HubDaemonClient(manager, args.hub, name, token=args.token, hf_token=resolve_hf_token(args.hf_token))
     client_task = asyncio.create_task(client.run_forever())
 
     logger.info("Ready — connecting outbound to hub at %s", args.hub)
