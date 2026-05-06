@@ -75,11 +75,11 @@ http://<hub-host>:9341/#uiToken=<browser-token>
 | Environment | Branch | Space | URL | Deploy behavior |
 |-------------|--------|-------|-----|-----------------|
 | Development | `main` | `edbeeching/agentic-ui-dev` | `https://edbeeching-agentic-ui-dev.hf.space` | Auto-deploy after `main` CI passes |
-| Production | `prod` | `edbeeching/agentic-ui` | `https://edbeeching-agentic-ui.hf.space` | Auto-deploy after `prod` CI passes |
+| Production | `prod` | `edbeeching/agentic-ui` | `https://edbeeching-agentic-ui.hf.space` | Manual deploy from `prod` with explicit production confirmation |
 
-Feature work should land through PRs into `main`. Production releases should be PRs from `main` into `prod` after the dev Space has been validated.
+Feature work should land through PRs into `main`. Production release candidates should be PRs from `main` into `prod` after the dev Space has been validated.
 
-Branch protection is not currently enforceable for this private repository setup, so production gating is by PR convention plus CI until the repository is public or branch protection is available.
+Branch protection and required environment reviewers are not currently enforceable for this private repository setup. Production deploys are therefore not automatic: the deploy workflow must be run manually from `prod` with `target=production` and the exact confirmation phrase `deploy production`.
 
 ## Hugging Face Spaces
 
@@ -143,12 +143,14 @@ The default image installs agentic-ui from the private Space repo and connects b
 3. Merge after CI passes; the dev Space deploys automatically.
 4. Validate `https://edbeeching-agentic-ui-dev.hf.space`.
 5. Open a PR from `main` into `prod`.
-6. Merge after CI passes; the production Space deploys automatically.
+6. Merge after CI passes.
+7. Manually run `Deploy HF Space` from the `prod` branch.
+8. Set `target=production` and `confirm_production=deploy production`.
 
 The GitHub workflow `Deploy HF Space` selects the Space target from the branch that passed CI:
 
-- `main` deploys to `edbeeching/agentic-ui-dev`.
-- `prod` deploys to `edbeeching/agentic-ui`.
+- successful `main` push CI deploys to `edbeeching/agentic-ui-dev`.
+- manual confirmed `prod` workflow runs deploy to `edbeeching/agentic-ui`.
 
 The workflow uses the GitHub Actions repository secret `HF_TOKEN` to upload to both Spaces.
 
