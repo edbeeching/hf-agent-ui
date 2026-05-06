@@ -318,7 +318,7 @@ export function useAgentUi() {
   const createPtySession = useCallback((
     daemonId: string,
     workDir: string,
-    tool: string = 'claude',
+    tool: string = 'codex',
     launch: LaunchOptions = { launchMode: 'local' },
     cols: number = 120,
     rows: number = 40,

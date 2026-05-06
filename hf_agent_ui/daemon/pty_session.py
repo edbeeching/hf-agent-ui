@@ -77,7 +77,7 @@ class PtySession:
     def __init__(
         self,
         work_dir: str,
-        tool: str = "claude",
+        tool: str = "codex",
         cols: int = 120,
         rows: int = 40,
         session_id: str | None = None,

@@ -205,7 +205,7 @@ function ProjectSection({
               {inputBadgeLabel(session.needs_input_kind)}
             </span>
           )}
-          <span className={`tool-badge ${session.tool || 'claude'}`}>{session.tool || 'claude'}</span>
+          <span className={`tool-badge ${session.tool || 'codex'}`}>{session.tool || 'codex'}</span>
           {session.launch_mode === 'custom' && (
             <span className="launch-badge" title={session.launch_command || 'Custom launch'}>
               {session.launch_label || 'custom'}

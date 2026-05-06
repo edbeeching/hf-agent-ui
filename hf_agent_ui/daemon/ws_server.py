@@ -84,7 +84,7 @@ class DaemonWsServer:
 
         match msg_type:
             case "pty.create":
-                tool = req.get("tool", "claude")
+                tool = req.get("tool", "codex")
                 work_dir = req.get("workDir", ".")
                 cols = req.get("cols", 120)
                 rows = req.get("rows", 40)
