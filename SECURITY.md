@@ -10,7 +10,7 @@ hf-agent-ui is a trusted-admin control plane for local and remote AI coding sess
 
 For local use, `hf-agent-ui hub` binds to `127.0.0.1` by default. For network use, configure `HF_AGENT_UI_BROWSER_TOKEN` or run behind a trusted private access layer and set `HF_AGENT_UI_TRUST_PROXY_AUTH=1`. Browser tokens should be bootstrapped with `#uiToken=...` so they are not sent in HTTP request URLs.
 
-For Hugging Face Spaces, set `HF_AGENT_UI_AUTH_MODE=hf-oauth` and enable Hugging Face OAuth. Signed-in users only see agent hosts and cloud jobs associated with their own Hugging Face account. Host tokens in this mode are signed per user and should be treated as bearer credentials.
+For Hugging Face Spaces, set `HF_AGENT_UI_AUTH_MODE=hf-oauth` and enable Hugging Face OAuth. Signed-in users only see agent hosts and cloud jobs associated with their own Hugging Face account. Host tokens in this mode are signed per user, expire after 30 days, and should be treated as bearer credentials.
 
 Custom launch commands intentionally execute shell commands on the selected agent host. Treat them as arbitrary code execution by the authenticated UI user.
 

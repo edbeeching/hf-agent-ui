@@ -118,7 +118,7 @@ Recommended Space variable:
 HF_AGENT_UI_USER_TOKEN_SECRET=<stable-random-secret>
 ```
 
-`HF_AGENT_UI_USER_TOKEN_SECRET` signs per-user agent-host tokens. If it is omitted, hf-agent-ui falls back to the OAuth client secret.
+`HF_AGENT_UI_USER_TOKEN_SECRET` signs per-user agent-host tokens. These tokens expire after 30 days. If the secret is omitted, hf-agent-ui falls back to the OAuth client secret.
 
 For single-user/local deployments without Hugging Face OAuth, keep using a shared host token:
 
