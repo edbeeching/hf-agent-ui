@@ -10,9 +10,21 @@ interface Props {
   onResize: (cols: number, rows: number) => void
   output: string[]
   visible?: boolean
+  needsInput?: boolean
+  inputReason?: string | null
+  tool?: string
 }
 
-export function TerminalView({ sessionId, onInput, onResize, output, visible = true }: Props) {
+export function TerminalView({
+  sessionId,
+  onInput,
+  onResize,
+  output,
+  visible = true,
+  needsInput = false,
+  inputReason = null,
+  tool,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -124,14 +136,26 @@ export function TerminalView({ sessionId, onInput, onResize, output, visible = t
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="terminal-container"
-      style={{ flex: 1, padding: 4, background: '#0d1117' }}
-    />
+    <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`}>
+      {needsInput && (
+        <div className="input-required-banner" role="status">
+          <span className="input-required-banner-label">Input needed</span>
+          <span className="input-required-banner-reason">
+            {inputReason || `${toolLabel(tool)} is waiting for a response`}
+          </span>
+        </div>
+      )}
+      <div ref={containerRef} className="terminal-container" />
+    </div>
   )
 }
 
 function terminalFontSize(): number {
   return window.matchMedia('(max-width: 760px)').matches ? 12 : 13
+}
+
+function toolLabel(tool?: string): string {
+  if (tool === 'codex') return 'Codex'
+  if (tool === 'bash') return 'Bash'
+  return 'Claude'
 }

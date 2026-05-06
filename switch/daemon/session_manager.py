@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -103,17 +105,30 @@ class SessionManager:
         self._save()
 
     def _save(self) -> None:
+        tmp_path: Path | None = None
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
                 "version": 1,
                 "sessions": [session.to_record() for session in self._sessions.values()],
             }
-            tmp_path = self.state_path.with_suffix(".tmp")
-            tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=f".{self.state_path.name}.",
+                suffix=".tmp",
+                dir=self.state_path.parent,
+            )
+            tmp_path = Path(tmp_name)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+                fh.write("\n")
             tmp_path.replace(self.state_path)
         except OSError:
             logger.exception("Failed to save session state to %s", self.state_path)
+            if tmp_path and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    logger.debug("Failed to remove temp session state file %s", tmp_path, exc_info=True)
 
     def _load(self) -> None:
         try:

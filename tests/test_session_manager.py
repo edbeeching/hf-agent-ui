@@ -73,3 +73,23 @@ def test_session_manager_persists_custom_launch_metadata(tmp_path: Path) -> None
     assert restored_info["launch_mode"] == "custom"
     assert restored_info["launch_command"] == "srun --pty --chdir {workDir} {command}"
     assert restored_info["launch_label"] == "gpu"
+
+
+def test_session_manager_save_uses_unique_temp_file(monkeypatch, tmp_path: Path) -> None:
+    state_path = tmp_path / "sessions.json"
+    fixed_tmp_path = state_path.with_suffix(".tmp")
+    original_replace = Path.replace
+
+    def replace(path: Path, target: Path) -> Path:
+        if path == fixed_tmp_path:
+            raise AssertionError("session state save used shared fixed temp path")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+
+    manager = SessionManager(state_path)
+    manager.create_pty(str(tmp_path), tool="claude")
+
+    assert state_path.exists()
+    assert not fixed_tmp_path.exists()
+    assert list(tmp_path.glob(".sessions.json.*.tmp")) == []

@@ -76,6 +76,7 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
           <label>
             Tool
             <select value={tool} onChange={e => setTool(e.target.value)}>
+              <option value="bash">Bash terminal</option>
               <option value="claude">Claude Code</option>
               <option value="codex">Codex CLI</option>
             </select>
