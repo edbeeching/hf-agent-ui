@@ -4,6 +4,8 @@ sdk: docker
 app_port: 7860
 fullWidth: true
 header: mini
+hf_oauth: true
+hf_oauth_expiration_minutes: 43200
 ---
 
 # hf-agent-ui
@@ -96,23 +98,34 @@ Both Spaces are private Docker Spaces using the front matter at the top of this 
 ```yaml
 sdk: docker
 app_port: 7860
+hf_oauth: true
 ```
 
 Each Space needs:
 
 ```bash
-HF_AGENT_UI_HOST_TOKEN=<environment-specific-shared-secret>
+HF_AGENT_UI_AUTH_MODE=hf-oauth
+HF_AGENT_UI_TRUST_PROXY_AUTH=1
+HF_AGENT_UI_SPACE_REPO_ID=<space-repo-id>
 HF_TOKEN=<hf-token-with-space-and-jobs-access>
 ```
 
-Each Space also needs:
+Use `HF_AGENT_UI_SPACE_REPO_ID=edbeeching/hf-agent-ui-dev` for dev and `HF_AGENT_UI_SPACE_REPO_ID=edbeeching/hf-agent-ui` for prod.
+
+Recommended Space variable:
 
 ```bash
-HF_AGENT_UI_TRUST_PROXY_AUTH=1
-HF_AGENT_UI_SPACE_REPO_ID=<space-repo-id>
+HF_AGENT_UI_USER_TOKEN_SECRET=<stable-random-secret>
 ```
 
-Use `HF_AGENT_UI_SPACE_REPO_ID=edbeeching/hf-agent-ui-dev` for dev and `HF_AGENT_UI_SPACE_REPO_ID=edbeeching/hf-agent-ui` for prod.
+`HF_AGENT_UI_USER_TOKEN_SECRET` signs per-user agent-host tokens. If it is omitted, hf-agent-ui falls back to the OAuth client secret.
+
+For single-user/local deployments without Hugging Face OAuth, keep using a shared host token:
+
+```bash
+HF_AGENT_UI_AUTH_MODE=single
+HF_AGENT_UI_HOST_TOKEN=<environment-specific-shared-secret>
+```
 
 For private/internal single-user Spaces only, you can optionally expose the agent-host token in the web UI copy command:
 
@@ -120,13 +133,12 @@ For private/internal single-user Spaces only, you can optionally expose the agen
 HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN=1
 ```
 
-To connect an agent host to a Space:
+To connect an agent host to a Space, sign in to the Space UI and use the exact copy command shown there. It includes a token scoped to your Hugging Face account:
 
 ```bash
 uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
 export HF_TOKEN=<hf-token>
-export HF_AGENT_UI_HOST_TOKEN=<environment-specific-shared-secret>
-hf-agent-ui host --hub https://<space-subdomain>.hf.space
+hf-agent-ui host --hub https://<space-subdomain>.hf.space --token <copy-from-ui>
 ```
 
 The public Space names are:
@@ -138,7 +150,7 @@ Production:  https://edbeeching-hf-agent-ui.hf.space
 
 ### Cloud Agent Hosts
 
-The Space UI can launch an agent host as a Hugging Face Job. The Space-side `HF_TOKEN` and `HF_AGENT_UI_HOST_TOKEN` secrets are passed server-side to the job; they are not returned to the browser.
+Cloud agent host support through Hugging Face Jobs is implemented behind a hidden frontend flag while the UX is still being iterated. When enabled, the Space-side `HF_TOKEN` and the current user's signed host token are passed server-side to the job; they are not returned to the browser response.
 
 Optional Space variables:
 
@@ -230,7 +242,8 @@ The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to t
 
 ## Security Notes
 
-- Keep dev and prod `HF_AGENT_UI_HOST_TOKEN` values separate.
-- Do not expose `HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN=1` outside trusted private single-user Spaces.
+- Keep dev and prod OAuth client secrets and `HF_AGENT_UI_USER_TOKEN_SECRET` values separate.
+- In single-user mode, keep dev and prod `HF_AGENT_UI_HOST_TOKEN` values separate.
+- Do not expose `HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN=1` outside trusted private single-user deployments.
 - Cloud agent hosts are intentionally powerful; only launch trusted images with the credentials needed for the intended work.
 - See [SECURITY.md](SECURITY.md) for the current security posture and reporting guidance.
