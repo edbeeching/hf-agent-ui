@@ -5,7 +5,8 @@ const CUSTOM_LAUNCH_STORAGE_KEY = 'hf-agent-ui.customLaunch'
 
 interface Props {
   daemons: Daemon[]
-  recentWorkDirs: string[]
+  getRecentWorkDirs: (daemon: Daemon | null) => string[]
+  onRemoveRecentWorkDir: (daemon: Daemon, workDir: string) => void
   onClose: () => void
   onCreate: (
     daemonId: string,
@@ -15,13 +16,20 @@ interface Props {
   ) => void
 }
 
-export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }: Props) {
+export function NewSessionDialog({
+  daemons,
+  getRecentWorkDirs,
+  onRemoveRecentWorkDir,
+  onClose,
+  onCreate,
+}: Props) {
   const connectedDaemons = daemons.filter(daemon => daemon.connected)
   const defaultDaemonId = connectedDaemons[0]?.id || ''
+  const defaultDaemon = connectedDaemons[0] || null
   const storedCustomLaunch = readCustomLaunch()
   const [daemonId, setDaemonId] = useState(defaultDaemonId)
-  const [tool, setTool] = useState('claude')
-  const [workDir, setWorkDir] = useState(recentWorkDirs[0] || '~')
+  const [tool, setTool] = useState('codex')
+  const [workDir, setWorkDir] = useState(getRecentWorkDirs(defaultDaemon)[0] || '~')
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
   const [launchCommand, setLaunchCommand] = useState(storedCustomLaunch.command)
@@ -29,6 +37,8 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
   const selectedDaemonId = connectedDaemons.some(daemon => daemon.id === daemonId)
     ? daemonId
     : defaultDaemonId
+  const selectedDaemon = connectedDaemons.find(daemon => daemon.id === selectedDaemonId) || null
+  const recentWorkDirs = getRecentWorkDirs(selectedDaemon)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -51,7 +61,6 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
     onClose()
   }
 
-  const selectedDaemon = connectedDaemons.find(daemon => daemon.id === selectedDaemonId)
   const title = connectedDaemons.length === 1 && selectedDaemon
     ? `New Session on ${selectedDaemon.name}`
     : 'New Session'
@@ -64,7 +73,16 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
           {connectedDaemons.length > 1 && (
             <label>
               Agent host
-              <select value={selectedDaemonId} onChange={e => setDaemonId(e.target.value)}>
+              <select
+                value={selectedDaemonId}
+                onChange={e => {
+                  const nextDaemonId = e.target.value
+                  const nextDaemon = connectedDaemons.find(daemon => daemon.id === nextDaemonId) || null
+                  setDaemonId(nextDaemonId)
+                  setWorkDir(getRecentWorkDirs(nextDaemon)[0] || '~')
+                  setError(null)
+                }}
+              >
                 {connectedDaemons.map(daemon => (
                   <option key={daemon.id} value={daemon.id}>
                     {daemon.name}
@@ -76,9 +94,9 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
           <label>
             Tool
             <select value={tool} onChange={e => setTool(e.target.value)}>
-              <option value="bash">Bash terminal</option>
-              <option value="claude">Claude Code</option>
               <option value="codex">Codex CLI</option>
+              <option value="claude">Claude Code</option>
+              <option value="bash">Bash terminal</option>
             </select>
           </label>
           <label>
@@ -123,21 +141,43 @@ export function NewSessionDialog({ daemons, recentWorkDirs, onClose, onCreate }:
           <label>
             Working directory
             {recentWorkDirs.length > 0 && (
-              <select
-                className="recent-dir-select"
-                value={recentWorkDirs.includes(workDir) ? workDir : ''}
-                onChange={e => setWorkDir(e.target.value || workDir)}
-              >
-                <option value="">Recent directories</option>
+              <div className="recent-dir-list" aria-label="Recent directories">
                 {recentWorkDirs.map(dir => (
-                  <option key={dir} value={dir}>{dir}</option>
+                  <div
+                    className={`recent-dir-row ${dir === workDir ? 'selected' : ''}`}
+                    key={dir}
+                  >
+                    <button
+                      type="button"
+                      className="recent-dir-main"
+                      onClick={() => {
+                        setWorkDir(dir)
+                      }}
+                    >
+                      <span className="recent-dir-name">{projectNameFromPath(dir)}</span>
+                      <span className="recent-dir-path">{dir}</span>
+                    </button>
+                    {selectedDaemon && (
+                      <button
+                        type="button"
+                        className="recent-dir-remove"
+                        aria-label={`Remove ${dir} from recent directories`}
+                        title="Remove"
+                        onClick={() => onRemoveRecentWorkDir(selectedDaemon, dir)}
+                      >
+                        x
+                      </button>
+                    )}
+                  </div>
                 ))}
-              </select>
+              </div>
             )}
             <input
               type="text"
               value={workDir}
-              onChange={e => setWorkDir(e.target.value)}
+              onChange={e => {
+                setWorkDir(e.target.value)
+              }}
               placeholder="/path/to/project"
               required
             />
@@ -184,4 +224,12 @@ function readCustomLaunch(): { label: string; command: string } {
 
 function writeCustomLaunch(launch: { label: string; command: string }) {
   window.localStorage.setItem(CUSTOM_LAUNCH_STORAGE_KEY, JSON.stringify(launch))
+}
+
+function projectNameFromPath(path: string): string {
+  const trimmed = path.trim()
+  const cleaned = trimmed.replace(/[\\/]+$/, '')
+  if (!cleaned || cleaned === '~') return 'Home'
+  const parts = cleaned.split(/[\\/]+/)
+  return parts[parts.length - 1] || cleaned
 }

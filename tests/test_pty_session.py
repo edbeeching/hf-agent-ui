@@ -21,6 +21,12 @@ from hf_agent_ui.daemon.pty_session import (
 MOCK_CLI = str(Path(__file__).parent / "mock_cli.py")
 
 
+def test_default_tool_is_codex(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path))
+
+    assert session.tool == "codex"
+
+
 def test_pause_exits_tui_cleanly_and_keeps_session_paused(tmp_path: Path) -> None:
     async def run() -> None:
         session = PtySession(work_dir=str(tmp_path), tool="mock")

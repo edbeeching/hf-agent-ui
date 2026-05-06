@@ -23,7 +23,7 @@ class SessionManager:
     def create_pty(
         self,
         work_dir: str,
-        tool: str = "claude",
+        tool: str = "codex",
         cols: int = 120,
         rows: int = 40,
         launch_mode: str = "local",

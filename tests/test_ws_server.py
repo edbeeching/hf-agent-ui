@@ -24,6 +24,15 @@ def _register_mock_pty_tool():
     del TOOL_COMMANDS["mock"]
 
 
+@pytest.fixture
+def _mock_codex_tool():
+    """Temporarily point the default Codex tool at the mock CLI."""
+    original = TOOL_COMMANDS["codex"]
+    TOOL_COMMANDS["codex"] = [sys.executable, MOCK_CLI]
+    yield
+    TOOL_COMMANDS["codex"] = original
+
+
 async def _send_recv(ws, data: dict) -> list[dict]:
     """Send a message and collect responses for a short window."""
     await ws.send(json.dumps(data))
@@ -83,6 +92,29 @@ async def test_create_pty_session_via_ws(tmp_path: Path) -> None:
 
             session_id = created["session"]["id"]
             assert manager.get(session_id) is not None
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_create_pty_session_defaults_to_codex_via_ws(tmp_path: Path) -> None:
+    """Omitting tool from pty.create starts the default Codex session."""
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["tool"] == "codex"
     finally:
         manager.stop_all()
         await server.stop()
