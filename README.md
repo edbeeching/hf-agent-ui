@@ -27,6 +27,14 @@ Install from the GitHub repository with `uv`:
 uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
 ```
 
+If you previously installed the project as `switch`, remove the old tool and use the new command name:
+
+```bash
+uv tool uninstall switch
+uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
+hf-agent-ui --help
+```
+
 Update an installed copy:
 
 ```bash
@@ -120,6 +128,15 @@ export HF_TOKEN=<hf-token>
 export HF_AGENT_UI_HOST_TOKEN=<environment-specific-shared-secret>
 hf-agent-ui host --hub https://<space-subdomain>.hf.space
 ```
+
+The public Space names are:
+
+```text
+Development: https://edbeeching-hf-agent-ui-dev.hf.space
+Production:  https://edbeeching-hf-agent-ui.hf.space
+```
+
+The older `edbeeching-agentic-ui*.hf.space` URLs were renamed and should not be used for new host connections.
 
 ### Cloud Agent Hosts
 
