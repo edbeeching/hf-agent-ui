@@ -282,6 +282,10 @@ async def test_input_required_event_and_clear_via_ws(tmp_path: Path) -> None:
             required = next(m for m in msgs if m["type"] == "session.input_required")
             assert required["sessionId"] == session_id
             assert required["source"] == "pty"
+            assert required["kind"] == "permission"
+            assert required["title"] == "Permission required"
+            assert required["message"] == "Permission required"
+            assert isinstance(required["detectedAt"], str)
             assert "permission" in required["reason"].lower()
 
             await ws.send(json.dumps({

@@ -52,9 +52,23 @@ class PtySessionInfo:
     created_at: str
     needs_input: bool
     needs_input_reason: str | None
+    needs_input_kind: str | None
+    needs_input_source: str | None
+    needs_input_title: str | None
+    needs_input_message: str | None
+    needs_input_detected_at: str | None
     launch_mode: str
     launch_command: str | None
     launch_label: str | None
+
+
+@dataclass(frozen=True)
+class InputRequiredSignal:
+    reason: str
+    kind: str
+    title: str
+    message: str | None = None
+    tool_name: str | None = None
 
 
 class PtySession:
@@ -87,6 +101,11 @@ class PtySession:
         self.launch_label = _normalize_launch_label(self.launch_mode, launch_label)
         self.needs_input = False
         self.needs_input_reason: str | None = None
+        self.needs_input_kind: str | None = None
+        self.needs_input_source: str | None = None
+        self.needs_input_title: str | None = None
+        self.needs_input_message: str | None = None
+        self.needs_input_detected_at: str | None = None
         self._master_fd: int | None = None
         self._proc: subprocess.Popen | None = None
         self._read_task: asyncio.Task | None = None
@@ -97,6 +116,7 @@ class PtySession:
         self._output_buffer: list[str] = []
         self._output_buffer_bytes = 0
         self._exit_status = "stopped"
+        self._codex_hook_enabled = False
 
     def on_event(self, cb: EventCallback) -> None:
         self._callbacks.append(cb)
@@ -133,7 +153,11 @@ class PtySession:
 
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
-        hook_file = self._prepare_claude_notification_hook(env) if self.tool == "claude" else None
+        hook_file: Path | None = None
+        if self.tool == "claude":
+            hook_file = self._prepare_claude_notification_hook(env)
+        elif self.tool == "codex":
+            hook_file = self._prepare_codex_permission_hook(env)
         args = self._build_args(cmd, resume=resume)
 
         self._proc = subprocess.Popen(
@@ -159,8 +183,10 @@ class PtySession:
         logger.info("PTY session %s started (pid=%d, tool=%s)", self.id, self._proc.pid, self.tool)
         await self._emit({"type": "pty.started", "sessionId": self.id})
 
-        if hook_file:
+        if hook_file and self.tool == "claude":
             self._hook_task = asyncio.create_task(self._watch_claude_notifications(hook_file))
+        elif hook_file and self.tool == "codex":
+            self._hook_task = asyncio.create_task(self._watch_codex_permission_requests(hook_file))
         self._read_task = asyncio.create_task(self._read_loop())
 
     def _build_args(self, cmd: list[str], *, resume: bool) -> list[str]:
@@ -178,6 +204,8 @@ class PtySession:
                 self.resume_token = self.resume_token or str(uuid.uuid4())
                 args.extend(["--session-id", self.resume_token])
         elif self.tool == "codex":
+            if self._codex_hook_enabled:
+                args.extend(_codex_hook_config_args())
             args.extend(["--cd", self.work_dir])
             if resume:
                 args.append("resume")
@@ -392,6 +420,11 @@ class PtySession:
             created_at=self.created_at,
             needs_input=self.needs_input,
             needs_input_reason=self.needs_input_reason,
+            needs_input_kind=self.needs_input_kind,
+            needs_input_source=self.needs_input_source,
+            needs_input_title=self.needs_input_title,
+            needs_input_message=self.needs_input_message,
+            needs_input_detected_at=self.needs_input_detected_at,
             launch_mode=self.launch_mode,
             launch_command=self.launch_command,
             launch_label=self.launch_label,
@@ -424,24 +457,51 @@ class PtySession:
             removed = self._output_buffer.pop(0)
             self._output_buffer_bytes -= len(removed.encode("utf-8", errors="replace"))
 
-    async def _mark_input_required(self, reason: str, source: str) -> None:
-        reason = reason.strip() or "Human input required"
-        if self.needs_input and self.needs_input_reason == reason:
+    async def _mark_input_required(self, signal: InputRequiredSignal, source: str) -> None:
+        reason = signal.reason.strip() or "Human input required"
+        kind = _normalize_input_kind(signal.kind)
+        title = signal.title.strip() or _title_for_input_kind(kind)
+        message = signal.message.strip() if signal.message else reason
+        source = source.strip() or "pty"
+        if (
+            self.needs_input
+            and self.needs_input_reason == reason
+            and self.needs_input_kind == kind
+            and self.needs_input_source == source
+        ):
             return
+        detected_at = datetime.now(timezone.utc).isoformat()
         self.needs_input = True
         self.needs_input_reason = reason
-        await self._emit({
+        self.needs_input_kind = kind
+        self.needs_input_source = source
+        self.needs_input_title = title
+        self.needs_input_message = message
+        self.needs_input_detected_at = detected_at
+        event: dict[str, Any] = {
             "type": "session.input_required",
             "sessionId": self.id,
             "reason": reason,
             "source": source,
-        })
+            "kind": kind,
+            "title": title,
+            "message": message,
+            "detectedAt": detected_at,
+        }
+        if signal.tool_name:
+            event["toolName"] = signal.tool_name
+        await self._emit(event)
 
     async def _mark_input_resolved(self) -> None:
         if not self.needs_input:
             return
         self.needs_input = False
         self.needs_input_reason = None
+        self.needs_input_kind = None
+        self.needs_input_source = None
+        self.needs_input_title = None
+        self.needs_input_message = None
+        self.needs_input_detected_at = None
         self._recent_output = ""
         await self._emit({
             "type": "session.input_resolved",
@@ -460,9 +520,9 @@ class PtySession:
         if not clean.strip():
             return
         self._recent_output = (self._recent_output + clean)[-4000:]
-        reason = _detect_action_required(self._recent_output, self.tool)
-        if reason:
-            await self._mark_input_required(reason, "pty")
+        signal = _detect_action_required(self._recent_output, self.tool)
+        if signal:
+            await self._mark_input_required(signal, "pty")
 
     def _prepare_claude_notification_hook(self, env: dict[str, str]) -> Path | None:
         hook_dir = Path(tempfile.gettempdir()) / "hf-agent-ui-claude-hooks"
@@ -478,6 +538,18 @@ class PtySession:
             self._install_claude_notification_hook()
         except Exception:
             logger.exception("Failed to install Claude notification hook for session %s", self.id)
+        return hook_file
+
+    def _prepare_codex_permission_hook(self, env: dict[str, str]) -> Path | None:
+        hook_dir = Path(tempfile.gettempdir()) / "hf-agent-ui-codex-hooks"
+        hook_dir.mkdir(parents=True, exist_ok=True)
+        hook_file = hook_dir / f"{self.id}.jsonl"
+        hook_file.touch(exist_ok=True)
+
+        env["HF_AGENT_UI_PTY_SESSION_ID"] = self.id
+        env["HF_AGENT_UI_CODEX_HOOK_DIR"] = str(hook_dir)
+        env["HF_AGENT_UI_PYTHON"] = sys.executable
+        self._codex_hook_enabled = True
         return hook_file
 
     def _install_claude_notification_hook(self) -> None:
@@ -543,15 +615,39 @@ class PtySession:
                                 continue
                             if event.get("hook_event_name") != "Notification":
                                 continue
-                            message = str(event.get("message", ""))
-                            reason = _detect_claude_notification(message)
-                            if reason:
-                                await self._mark_input_required(reason, "claude-hook")
+                            signal = _detect_claude_notification(event)
+                            if signal:
+                                await self._mark_input_required(signal, "claude-hook")
                 await asyncio.sleep(0.5)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("Failed to read Claude notification hook output")
+                await asyncio.sleep(1.0)
+
+    async def _watch_codex_permission_requests(self, hook_file: Path) -> None:
+        offset = 0
+        while self._proc and self._proc.poll() is None:
+            try:
+                if hook_file.exists():
+                    with hook_file.open() as f:
+                        f.seek(offset)
+                        while line := f.readline():
+                            offset = f.tell()
+                            try:
+                                event = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if event.get("hook_event_name") != "PermissionRequest":
+                                continue
+                            signal = _detect_codex_permission_request(event)
+                            if signal:
+                                await self._mark_input_required(signal, "codex-hook")
+                await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Failed to read Codex permission hook output")
                 await asyncio.sleep(1.0)
 
 
@@ -566,36 +662,111 @@ def _strip_ansi(text: str) -> str:
     return ANSI_RE.sub("", text).replace("\r", "\n")
 
 
-def _detect_claude_notification(message: str) -> str | None:
+def _detect_claude_notification(event: dict[str, Any]) -> InputRequiredSignal | None:
+    message = str(event.get("message", "")).strip()
+    notification_type = str(event.get("notification_type", "")).strip()
+    title = str(event.get("title", "")).strip()
+
+    if notification_type == "permission_prompt":
+        return InputRequiredSignal(
+            reason=message or "Claude permission required",
+            kind="permission",
+            title=title or "Claude permission required",
+            message=message or None,
+            tool_name="claude",
+        )
+    if notification_type == "idle_prompt":
+        return InputRequiredSignal(
+            reason=message or "Claude is waiting for input",
+            kind="prompt",
+            title=title or "Claude waiting",
+            message=message or None,
+            tool_name="claude",
+        )
+    if notification_type == "elicitation_dialog":
+        return InputRequiredSignal(
+            reason=message or "Claude needs input from an MCP dialog",
+            kind="prompt",
+            title=title or "Claude input requested",
+            message=message or None,
+            tool_name="claude",
+        )
+
     lower = message.lower()
-    if "permission" in lower or "waiting for your input" in lower or "needs your" in lower:
-        return message
+    if "permission" in lower or "needs your" in lower:
+        return InputRequiredSignal(
+            reason=message or "Claude permission required",
+            kind="permission",
+            title=title or "Claude permission required",
+            message=message or None,
+            tool_name="claude",
+        )
+    if "waiting for your input" in lower:
+        return InputRequiredSignal(
+            reason=message or "Claude is waiting for input",
+            kind="prompt",
+            title=title or "Claude waiting",
+            message=message or None,
+            tool_name="claude",
+        )
     return None
 
 
-def _detect_action_required(output: str, tool: str) -> str | None:
+def _detect_codex_permission_request(event: dict[str, Any]) -> InputRequiredSignal | None:
+    tool_name = str(event.get("tool_name", "")).strip() or "tool"
+    tool_input = event.get("tool_input")
+    description = None
+    command = None
+    if isinstance(tool_input, dict):
+        raw_description = tool_input.get("description")
+        raw_command = tool_input.get("command")
+        if isinstance(raw_description, str) and raw_description.strip():
+            description = raw_description.strip()
+        if isinstance(raw_command, str) and raw_command.strip():
+            command = raw_command.strip()
+
+    if description:
+        reason = description
+        message = description
+    elif command:
+        reason = "Codex command approval required"
+        message = f"Codex wants to run: {command}"
+    else:
+        reason = f"Codex needs approval for {tool_name}"
+        message = reason
+
+    return InputRequiredSignal(
+        reason=reason,
+        kind="permission",
+        title="Codex approval required",
+        message=message,
+        tool_name=tool_name,
+    )
+
+
+def _detect_action_required(output: str, tool: str) -> InputRequiredSignal | None:
     text = " ".join(output.lower().split())
 
     common_patterns = [
-        (r"\bneeds your permission\b", "Permission required"),
-        (r"\bwaiting for your input\b", "Waiting for input"),
-        (r"\bdo you want to\b", "Confirmation required"),
-        (r"\bpress enter to continue\b", "Waiting for Enter"),
-        (r"\b(sign in|log in|login|authenticate)\b", "Authentication required"),
-        (r"\b(approve|approval required)\b", "Approval required"),
-        (r"\b(allow|deny)\b.*\?", "Permission required"),
-        (r"\b(y/n|yes/no)\b", "Confirmation required"),
+        (r"\bneeds your permission\b", InputRequiredSignal("Permission required", "permission", "Permission required")),
+        (r"\bwaiting for your input\b", InputRequiredSignal("Waiting for input", "prompt", "Input needed")),
+        (r"\bdo you want to\b", InputRequiredSignal("Confirmation required", "confirmation", "Confirmation required")),
+        (r"\bpress enter to continue\b", InputRequiredSignal("Waiting for Enter", "prompt", "Input needed")),
+        (r"\b(sign in|log in|login|authenticate)\b", InputRequiredSignal("Authentication required", "auth", "Authentication required")),
+        (r"\b(approve|approval required)\b", InputRequiredSignal("Approval required", "permission", "Approval required")),
+        (r"\b(allow|deny)\b.*\?", InputRequiredSignal("Permission required", "permission", "Permission required")),
+        (r"\b(y/n|yes/no)\b", InputRequiredSignal("Confirmation required", "confirmation", "Confirmation required")),
     ]
 
     codex_patterns = [
-        (r"\bapprove\b.*\b(command|edit|patch|change)\b", "Codex approval required"),
-        (r"\brun command\b.*\?", "Codex command approval required"),
-        (r"\bapply\b.*\bpatch\b.*\?", "Codex edit approval required"),
+        (r"\bapprove\b.*\b(command|edit|patch|change)\b", InputRequiredSignal("Codex approval required", "permission", "Codex approval required")),
+        (r"\brun command\b.*\?", InputRequiredSignal("Codex command approval required", "permission", "Codex approval required")),
+        (r"\bapply\b.*\bpatch\b.*\?", InputRequiredSignal("Codex edit approval required", "permission", "Codex approval required")),
     ]
 
     claude_patterns = [
-        (r"\bclaude needs your permission\b", "Claude permission required"),
-        (r"\bpermission to use\b", "Claude permission required"),
+        (r"\bclaude needs your permission\b", InputRequiredSignal("Claude permission required", "permission", "Claude permission required")),
+        (r"\bpermission to use\b", InputRequiredSignal("Claude permission required", "permission", "Claude permission required")),
     ]
 
     patterns = common_patterns
@@ -608,6 +779,42 @@ def _detect_action_required(output: str, tool: str) -> str | None:
         if re.search(pattern, text):
             return reason
     return None
+
+
+def _normalize_input_kind(kind: str) -> str:
+    if kind in {"permission", "confirmation", "auth", "prompt"}:
+        return kind
+    return "prompt"
+
+
+def _title_for_input_kind(kind: str) -> str:
+    if kind == "permission":
+        return "Permission required"
+    if kind == "confirmation":
+        return "Confirmation required"
+    if kind == "auth":
+        return "Authentication required"
+    return "Input needed"
+
+
+def _codex_hook_config_args() -> list[str]:
+    command = shlex.join([sys.executable, "-m", "hf_agent_ui.daemon.codex_hook"])
+    hook_config = (
+        "hooks.PermissionRequest=[{"
+        'matcher="", hooks=[{'
+        'type="command", '
+        f"command={json.dumps(command)}, "
+        "timeout=5, "
+        'statusMessage="Notifying hf-agent-ui"'
+        "}]"
+        "}]"
+    )
+    return [
+        "-c",
+        "features.codex_hooks=true",
+        "-c",
+        hook_config,
+    ]
 
 
 def _normalize_launch_mode(value: object) -> str:

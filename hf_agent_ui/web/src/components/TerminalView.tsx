@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import type { InputRequiredKind } from '../hooks/useAgentUi'
 import 'xterm/css/xterm.css'
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
   visible?: boolean
   needsInput?: boolean
   inputReason?: string | null
+  inputKind?: InputRequiredKind | null
   tool?: string
 }
 
@@ -23,6 +25,7 @@ export function TerminalView({
   visible = true,
   needsInput = false,
   inputReason = null,
+  inputKind = null,
   tool,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -48,6 +51,10 @@ export function TerminalView({
       cursorBlink: true,
       fontSize: terminalFontSize(),
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace",
+      linkHandler: {
+        allowNonHttpProtocols: false,
+        activate: (_event, uri) => openTerminalLink(uri),
+      },
       theme: {
         background: '#0d1117',
         foreground: '#e6edf3',
@@ -73,7 +80,7 @@ export function TerminalView({
     })
 
     const fitAddon = new FitAddon()
-    const webLinksAddon = new WebLinksAddon()
+    const webLinksAddon = new WebLinksAddon((_event, uri) => openTerminalLink(uri))
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
     term.open(containerRef.current)
@@ -139,7 +146,9 @@ export function TerminalView({
     <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`}>
       {needsInput && (
         <div className="input-required-banner" role="status">
-          <span className="input-required-banner-label">Input needed</span>
+          <span className={`input-required-banner-label ${inputKind || 'prompt'}`}>
+            {inputKindLabel(inputKind)}
+          </span>
           <span className="input-required-banner-reason">
             {inputReason || `${toolLabel(tool)} is waiting for a response`}
           </span>
@@ -154,8 +163,42 @@ function terminalFontSize(): number {
   return window.matchMedia('(max-width: 760px)').matches ? 12 : 13
 }
 
+function openTerminalLink(uri: string): void {
+  const url = safeTerminalLink(uri)
+  if (!url) return
+
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.target = '_blank'
+  anchor.rel = 'noopener noreferrer'
+  anchor.referrerPolicy = 'no-referrer'
+  anchor.style.display = 'none'
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+function safeTerminalLink(uri: string): string | null {
+  try {
+    const url = new URL(uri)
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return url.toString()
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
 function toolLabel(tool?: string): string {
   if (tool === 'codex') return 'Codex'
   if (tool === 'bash') return 'Bash'
   return 'Claude'
+}
+
+function inputKindLabel(kind: InputRequiredKind | null): string {
+  if (kind === 'permission') return 'Permission'
+  if (kind === 'confirmation') return 'Confirm'
+  if (kind === 'auth') return 'Auth'
+  return 'Input needed'
 }

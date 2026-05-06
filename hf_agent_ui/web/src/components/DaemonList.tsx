@@ -82,12 +82,22 @@ export function DaemonList({
         <div key={environment.key} className="environment-group">
           <div className="environment-header">
             <span>{environment.label}</span>
+            {countEnvironmentInputRequired(environment) > 0 && (
+              <span className="group-input-count" title="Sessions needing input">
+                {countEnvironmentInputRequired(environment)}
+              </span>
+            )}
             <EnvironmentNewSessionButton environment={environment} onNewSession={onNewSession} />
           </div>
           {[...environment.projects.values()].map(project => (
             <div key={`${environment.key}-${project.name}`} className="project-group">
               <div className="project-header">
                 <span className="project-name">{project.name}</span>
+                {countProjectInputRequired(project) > 0 && (
+                  <span className="group-input-count" title="Sessions needing input">
+                    {countProjectInputRequired(project)}
+                  </span>
+                )}
                 <span className="project-count">{countProjectSessions(project)}</span>
               </div>
               <ProjectSection
@@ -190,7 +200,11 @@ function ProjectSection({
           aria-label={session.needs_input ? `${session.tool} session needs input` : `${session.tool} session`}
         >
           <span className={`status-dot ${session.needs_input ? 'input-required' : session.status}`} />
-          {session.needs_input && <span className="input-required-badge">Input</span>}
+          {session.needs_input && (
+            <span className={`input-required-badge ${session.needs_input_kind || 'prompt'}`}>
+              {inputBadgeLabel(session.needs_input_kind)}
+            </span>
+          )}
           <span className={`tool-badge ${session.tool || 'claude'}`}>{session.tool || 'claude'}</span>
           {session.launch_mode === 'custom' && (
             <span className="launch-badge" title={session.launch_command || 'Custom launch'}>
@@ -316,6 +330,22 @@ function projectNameFromPath(path: string): string {
 
 function countProjectSessions(project: ProjectGroup): number {
   return project.sessions.length
+}
+
+function countProjectInputRequired(project: ProjectGroup): number {
+  return project.sessions.filter(({ session }) => session.needs_input).length
+}
+
+function countEnvironmentInputRequired(environment: EnvironmentGroup): number {
+  return [...environment.projects.values()]
+    .reduce((total, project) => total + countProjectInputRequired(project), 0)
+}
+
+function inputBadgeLabel(kind: SessionInfo['needs_input_kind']): string {
+  if (kind === 'permission') return 'Permit'
+  if (kind === 'confirmation') return 'Confirm'
+  if (kind === 'auth') return 'Auth'
+  return 'Input'
 }
 
 function environmentDaemons(environment: EnvironmentGroup): Daemon[] {

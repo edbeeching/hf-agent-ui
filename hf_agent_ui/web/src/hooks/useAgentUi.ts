@@ -31,10 +31,17 @@ export interface SessionInfo {
   created_at: string
   needs_input: boolean
   needs_input_reason: string | null
+  needs_input_kind: InputRequiredKind | null
+  needs_input_source: string | null
+  needs_input_title: string | null
+  needs_input_message: string | null
+  needs_input_detected_at: string | null
   launch_mode: LaunchMode
   launch_command: string | null
   launch_label: string | null
 }
+
+export type InputRequiredKind = 'permission' | 'confirmation' | 'auth' | 'prompt'
 
 interface AgentUiState {
   connected: boolean
@@ -52,7 +59,20 @@ interface ServerMessage {
   data?: unknown
   reason?: string
   source?: string
+  kind?: string
+  title?: string
+  message?: string
+  detectedAt?: string
   status?: string
+}
+
+interface InputRequiredUpdate {
+  reason: string | null
+  kind: InputRequiredKind | null
+  source: string | null
+  title: string | null
+  message: string | null
+  detectedAt: string | null
 }
 
 export function useAgentUi() {
@@ -98,14 +118,23 @@ export function useAgentUi() {
   const updateSessionInputRequired = useCallback((
     sessionId: string,
     needsInput: boolean,
-    reason: string | null = null,
+    update: Partial<InputRequiredUpdate> = {},
   ) => {
     setState(s => {
       const sessions = new Map(s.sessions)
       for (const [did, list] of sessions) {
         sessions.set(did, list.map(sess =>
           sess.id === sessionId
-            ? { ...sess, needs_input: needsInput, needs_input_reason: needsInput ? reason : null }
+            ? {
+              ...sess,
+              needs_input: needsInput,
+              needs_input_reason: needsInput ? update.reason || 'Human input required' : null,
+              needs_input_kind: needsInput ? normalizeInputRequiredKind(update.kind) : null,
+              needs_input_source: needsInput ? update.source || null : null,
+              needs_input_title: needsInput ? update.title || null : null,
+              needs_input_message: needsInput ? update.message || null : null,
+              needs_input_detected_at: needsInput ? update.detectedAt || null : null,
+            }
             : sess
         ))
       }
@@ -211,7 +240,14 @@ export function useAgentUi() {
 
       case 'session.input_required': {
         if (!sessionId) return
-        updateSessionInputRequired(sessionId, true, msg.reason || 'Human input required')
+        updateSessionInputRequired(sessionId, true, {
+          reason: msg.reason || 'Human input required',
+          kind: normalizeInputRequiredKind(msg.kind),
+          source: typeof msg.source === 'string' ? msg.source : null,
+          title: typeof msg.title === 'string' ? msg.title : null,
+          message: typeof msg.message === 'string' ? msg.message : null,
+          detectedAt: typeof msg.detectedAt === 'string' ? msg.detectedAt : null,
+        })
         break
       }
 
@@ -375,6 +411,11 @@ function normalizeSession(session: SessionInfo): SessionInfo {
     mode: 'pty',
     needs_input: Boolean(session.needs_input),
     needs_input_reason: session.needs_input_reason || null,
+    needs_input_kind: normalizeInputRequiredKind(session.needs_input_kind),
+    needs_input_source: typeof session.needs_input_source === 'string' ? session.needs_input_source : null,
+    needs_input_title: typeof session.needs_input_title === 'string' ? session.needs_input_title : null,
+    needs_input_message: typeof session.needs_input_message === 'string' ? session.needs_input_message : null,
+    needs_input_detected_at: typeof session.needs_input_detected_at === 'string' ? session.needs_input_detected_at : null,
     launch_mode: session.launch_mode === 'custom' ? 'custom' : 'local',
     launch_command: typeof session.launch_command === 'string' ? session.launch_command : null,
     launch_label: typeof session.launch_label === 'string' ? session.launch_label : null,
@@ -386,4 +427,11 @@ function upsertSession(list: SessionInfo[], session: SessionInfo): SessionInfo[]
     return list.map(s => s.id === session.id ? session : s)
   }
   return [...list, session]
+}
+
+function normalizeInputRequiredKind(kind: unknown): InputRequiredKind | null {
+  if (kind === 'permission' || kind === 'confirmation' || kind === 'auth' || kind === 'prompt') {
+    return kind
+  }
+  return null
 }

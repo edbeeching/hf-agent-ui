@@ -37,7 +37,7 @@ class DaemonWsServer:
       { type: "pty.created", session: PtySessionInfo }
       { type: "pty.output", sessionId, data }
       { type: "pty.exit", sessionId, code }
-      { type: "session.input_required", sessionId, reason, source }
+      { type: "session.input_required", sessionId, reason, source, kind?, title?, message?, detectedAt? }
       { type: "session.input_resolved", sessionId }
       { type: "session.subscribed", session }
       { type: "session.list", sessions: [...] }
