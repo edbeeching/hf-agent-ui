@@ -636,6 +636,8 @@
   padding: 24px;
   width: 420px;
   max-width: 90vw;
+  max-height: min(90vh, 760px);
+  overflow-y: auto;
 }
 
 .dialog h3 {
@@ -677,8 +679,72 @@
   border-color: #1f6feb;
 }
 
-.recent-dir-select {
+.recent-dir-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
   margin-bottom: 8px;
+}
+
+.recent-dir-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+}
+
+.recent-dir-row.selected {
+  border-color: #1f6feb;
+  background: #1f6feb1f;
+}
+
+.recent-dir-main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-dir-main:hover,
+.recent-dir-remove:hover {
+  background: #1c2128;
+}
+
+.recent-dir-name,
+.recent-dir-path {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-dir-name {
+  color: #e6edf3;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recent-dir-path {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.recent-dir-remove {
+  border: 0;
+  border-left: 1px solid #30363d;
+  background: transparent;
+  color: #8b949e;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .dialog-error {

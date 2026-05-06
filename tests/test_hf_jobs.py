@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from hf_agent_ui.hub import hf_jobs
@@ -251,6 +252,22 @@ def test_hf_jobs_cancel_calls_client(monkeypatch) -> None:
 
     assert payload == {"status": "cancelling", "jobId": "job-123"}
     assert calls == [{"job_id": "job-123", "namespace": None, "token": "hf-secret"}]
+
+
+def test_hf_jobs_cancel_rejects_non_agent_job(monkeypatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf-secret")
+    calls = []
+    monkeypatch.setattr(
+        hf_jobs,
+        "inspect_job",
+        lambda **kwargs: FakeJob("job-123", FakeStatus("RUNNING"), {}),
+    )
+    monkeypatch.setattr(hf_jobs, "cancel_job", lambda **kwargs: calls.append(kwargs))
+
+    with pytest.raises(hf_jobs.HfJobsPermissionError):
+        hf_jobs.cancel_agent_host_job("job-123")
+
+    assert calls == []
 
 
 def test_hf_jobs_list_filters_by_owner(monkeypatch) -> None:

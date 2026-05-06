@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import json
 import os
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from fastapi import HTTPException, Request, WebSocket, status
 
@@ -23,6 +23,7 @@ HOST_TOKEN_HEADER = "x-hf-agent-ui-host-token"
 SIGNED_HOST_TOKEN_PREFIX = "hfu"
 SINGLE_USER_SUB = "single-user"
 SINGLE_USER_NAME = "single-user"
+UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,40 @@ def require_browser_user(request: Request) -> UserIdentity:
             detail="hf-agent-ui browser auth required",
         )
     return user
+
+
+def require_unsafe_http_origin(request: Request) -> None:
+    if request.method.upper() not in UNSAFE_HTTP_METHODS:
+        return
+    if not is_http_origin_allowed(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="hf-agent-ui rejected cross-origin request",
+        )
+
+
+def is_http_origin_allowed(request: Request) -> bool:
+    return _is_origin_allowed(
+        origin=request.headers.get("origin", ""),
+        scheme=_public_scheme(request.headers.get("x-forwarded-proto", ""), request.url.scheme),
+        host=_public_host(
+            request.headers.get("x-forwarded-host", ""),
+            request.headers.get("host", ""),
+            request.url.netloc,
+        ),
+    )
+
+
+def is_websocket_origin_allowed(ws: WebSocket) -> bool:
+    return _is_origin_allowed(
+        origin=ws.headers.get("origin", ""),
+        scheme=_public_scheme(ws.headers.get("x-forwarded-proto", ""), ws.url.scheme),
+        host=_public_host(
+            ws.headers.get("x-forwarded-host", ""),
+            ws.headers.get("host", ""),
+            ws.url.netloc,
+        ),
+    )
 
 
 def current_browser_http_user(request: Request) -> UserIdentity | None:
@@ -285,6 +320,55 @@ def _cookie_value(header: str, key: str) -> str:
         if name == key:
             return unquote(value)
     return ""
+
+
+def _is_origin_allowed(*, origin: str, scheme: str, host: str) -> bool:
+    if not origin:
+        return True
+
+    origin_parts = _origin_parts(origin)
+    request_parts = _origin_parts(f"{scheme}://{host}")
+    if origin_parts is None or request_parts is None:
+        return False
+    if origin_parts == request_parts:
+        return True
+
+    _, origin_host, origin_port = origin_parts
+    _, request_host, request_port = request_parts
+    if _is_local_host(origin_host) and _is_local_host(request_host) and origin_port == request_port:
+        return True
+    return False
+
+
+def _origin_parts(value: str) -> tuple[str, str, int] | None:
+    try:
+        parsed = urlparse(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        return (
+            parsed.scheme,
+            parsed.hostname.lower(),
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+        )
+    except ValueError:
+        return None
+
+
+def _public_scheme(forwarded_proto: str, fallback: str) -> str:
+    scheme = _first_header_value(forwarded_proto) or fallback
+    if scheme == "ws":
+        return "http"
+    if scheme == "wss":
+        return "https"
+    return scheme
+
+
+def _public_host(forwarded_host: str, host: str, fallback: str) -> str:
+    return _first_header_value(forwarded_host) or _first_header_value(host) or fallback
+
+
+def _first_header_value(value: str) -> str:
+    return value.split(",", 1)[0].strip().lower()
 
 
 def _is_local_host(value: str) -> bool:

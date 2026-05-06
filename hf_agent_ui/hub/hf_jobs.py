@@ -109,7 +109,8 @@ def cancel_agent_host_job(job_id: str, owner: UserIdentity | None = None) -> dic
     _require_hf_token()
     owner = owner or SINGLE_USER
     job = inspect_job(job_id=job_id, namespace=_jobs_namespace(), token=_hf_token())
-    if not _job_owner_matches(getattr(job, "labels", None) or {}, owner):
+    labels = getattr(job, "labels", None) or {}
+    if not _has_hf_agent_ui_labels(labels) or not _job_owner_matches(labels, owner):
         raise HfJobsPermissionError("HF Job is not owned by the current user")
     cancel_job(job_id=job_id, namespace=_jobs_namespace(), token=_hf_token())
     return {"status": "cancelling", "jobId": job_id}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAgentUi } from './hooks/useAgentUi'
 import type { Daemon, SessionInfo } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
@@ -27,6 +27,11 @@ interface AuthInfo {
   logoutUrl: string
 }
 
+interface RecentWorkDirsState {
+  legacy: string[]
+  byHost: Record<string, string[]>
+}
+
 function App() {
   const [auth, setAuth] = useState<AuthInfo | null>(null)
   const isAuthenticated = Boolean(auth?.authenticated)
@@ -45,7 +50,7 @@ function App() {
   } = sw
   const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(() => readStoredSelection())
   const [newSessionDaemonIds, setNewSessionDaemonIds] = useState<string[] | null>(null)
-  const [recentWorkDirs, setRecentWorkDirs] = useState<string[]>(() => readRecentWorkDirs())
+  const [recentWorkDirs, setRecentWorkDirs] = useState<RecentWorkDirsState>(() => readRecentWorkDirs())
   const [activeMobileView, setActiveMobileView] = useState<MobileView>('terminal')
   const activeSelected = selected && daemons.some(daemon => daemon.id === selected.daemonId)
     && (sessions.get(selected.daemonId) || []).some(session => session.id === selected.sessionId)
@@ -71,6 +76,13 @@ function App() {
   const newSessionDaemons = newSessionDaemonIds
     ? newSessionDaemonIds.map(id => daemons.find(daemon => daemon.id === id)).filter((daemon): daemon is Daemon => Boolean(daemon))
     : []
+  const getRecentWorkDirs = useCallback(
+    (daemon: Daemon | null) => recentWorkDirsForDaemon(recentWorkDirs, daemon),
+    [recentWorkDirs],
+  )
+  const removeRecentWorkDirForDaemon = useCallback((daemon: Daemon, workDir: string) => {
+    setRecentWorkDirs(current => persistRecentWorkDirs(removeRecentWorkDir(current, daemon, workDir)))
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -242,10 +254,12 @@ function App() {
       {newSessionDaemons.length > 0 && (
         <NewSessionDialog
           daemons={newSessionDaemons}
-          recentWorkDirs={recentWorkDirs}
+          getRecentWorkDirs={getRecentWorkDirs}
+          onRemoveRecentWorkDir={removeRecentWorkDirForDaemon}
           onClose={() => setNewSessionDaemonIds(null)}
           onCreate={(daemonId, workDir, tool, launch) => {
-            setRecentWorkDirs(updateRecentWorkDirs(workDir))
+            const daemon = newSessionDaemons.find(daemon => daemon.id === daemonId) || null
+            setRecentWorkDirs(current => persistRecentWorkDirs(addRecentWorkDir(current, daemon, workDir)))
             createPtySession(daemonId, workDir, tool, launch)
             setActiveMobileView('terminal')
           }}
@@ -728,27 +742,109 @@ function readStoredSelection(): { daemonId: string; sessionId: string } | null {
   }
 }
 
-function readRecentWorkDirs(): string[] {
+function readRecentWorkDirs(): RecentWorkDirsState {
   try {
     const raw = window.localStorage.getItem(RECENT_WORK_DIRS_STORAGE_KEY)
-    if (!raw) return []
+    if (!raw) return emptyRecentWorkDirs()
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
-      .slice(0, MAX_RECENT_WORK_DIRS)
+    if (Array.isArray(parsed)) {
+      return { legacy: normalizeRecentWorkDirs(parsed), byHost: {} }
+    }
+    if (!parsed || typeof parsed !== 'object') return emptyRecentWorkDirs()
+    const candidate = parsed as { legacy?: unknown; byHost?: unknown }
+    const byHost: Record<string, string[]> = {}
+    if (candidate.byHost && typeof candidate.byHost === 'object' && !Array.isArray(candidate.byHost)) {
+      for (const [host, dirs] of Object.entries(candidate.byHost)) {
+        const key = host.trim()
+        if (!key) continue
+        byHost[key] = normalizeRecentWorkDirs(dirs)
+      }
+    }
+    return {
+      legacy: normalizeRecentWorkDirs(candidate.legacy),
+      byHost,
+    }
   } catch {
-    return []
+    return emptyRecentWorkDirs()
   }
 }
 
-function updateRecentWorkDirs(workDir: string): string[] {
+function emptyRecentWorkDirs(): RecentWorkDirsState {
+  return { legacy: [], byHost: {} }
+}
+
+function normalizeRecentWorkDirs(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const dirs: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const trimmed = entry.trim()
+    if (!trimmed || dirs.includes(trimmed)) continue
+    dirs.push(trimmed)
+    if (dirs.length >= MAX_RECENT_WORK_DIRS) break
+  }
+  return dirs
+}
+
+function recentWorkDirsForDaemon(state: RecentWorkDirsState, daemon: Daemon | null): string[] {
+  if (!daemon) return state.legacy
+  const key = recentWorkDirsHostKey(daemon)
+  if (Object.prototype.hasOwnProperty.call(state.byHost, key)) {
+    return state.byHost[key]
+  }
+  return state.legacy
+}
+
+function addRecentWorkDir(
+  state: RecentWorkDirsState,
+  daemon: Daemon | null,
+  workDir: string,
+): RecentWorkDirsState {
   const trimmed = workDir.trim()
-  const current = readRecentWorkDirs()
-  const next = trimmed
-    ? [trimmed, ...current.filter(entry => entry !== trimmed)].slice(0, MAX_RECENT_WORK_DIRS)
-    : current
-  window.localStorage.setItem(RECENT_WORK_DIRS_STORAGE_KEY, JSON.stringify(next))
-  return next
+  if (!trimmed || !daemon) return state
+  const key = recentWorkDirsHostKey(daemon)
+  const current = state.byHost[key] || state.legacy
+  return {
+    ...state,
+    byHost: {
+      ...state.byHost,
+      [key]: [trimmed, ...current.filter(entry => entry !== trimmed)].slice(0, MAX_RECENT_WORK_DIRS),
+    },
+  }
+}
+
+function removeRecentWorkDir(
+  state: RecentWorkDirsState,
+  daemon: Daemon,
+  workDir: string,
+): RecentWorkDirsState {
+  const key = recentWorkDirsHostKey(daemon)
+  if (Object.prototype.hasOwnProperty.call(state.byHost, key)) {
+    return {
+      ...state,
+      byHost: {
+        ...state.byHost,
+        [key]: state.byHost[key].filter(entry => entry !== workDir),
+      },
+    }
+  }
+  return {
+    ...state,
+    legacy: state.legacy.filter(entry => entry !== workDir),
+  }
+}
+
+function persistRecentWorkDirs(state: RecentWorkDirsState): RecentWorkDirsState {
+  window.localStorage.setItem(RECENT_WORK_DIRS_STORAGE_KEY, JSON.stringify({
+    version: 2,
+    legacy: state.legacy,
+    byHost: state.byHost,
+  }))
+  return state
+}
+
+function recentWorkDirsHostKey(daemon: Daemon): string {
+  return daemon.name.trim() || daemon.hostname.trim() || daemon.id
 }
 
 interface InputRequiredItem {

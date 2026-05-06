@@ -241,6 +241,19 @@ def test_auth_cookie_endpoint_sets_httponly_cookie(monkeypatch) -> None:
     assert cookie_response.status_code == 200
 
 
+def test_unsafe_api_rejects_cross_origin_request(monkeypatch) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
+
+    with TestClient(app, base_url="https://hub.example.test:9341") as client:
+        response = client.post(
+            "/api/cloud/hf/jobs",
+            headers={"Origin": "https://evil.example.test"},
+            json={},
+        )
+
+    assert response.status_code == 403
+
+
 def test_http_responses_include_security_headers(monkeypatch) -> None:
     monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
     monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)

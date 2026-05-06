@@ -16,11 +16,12 @@ from .security import (
     current_browser_http_user,
     require_browser_http,
     require_browser_user,
+    require_unsafe_http_origin,
     should_expose_host_token,
     user_host_token,
 )
 
-router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http)])
+router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http), Depends(require_unsafe_http_origin)])
 public_router = APIRouter(prefix="/api")
 
 INSTALL_REPO_URL = "git+https://github.com/edbeeching/hf-agent-ui.git"

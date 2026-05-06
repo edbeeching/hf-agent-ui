@@ -6,6 +6,15 @@ from pathlib import Path
 from hf_agent_ui.daemon.session_manager import SessionManager
 
 
+def test_session_manager_default_tool_is_codex(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state.json")
+
+    session = manager.create_pty(str(tmp_path))
+
+    assert session.tool == "codex"
+    assert manager.list()[0]["tool"] == "codex"
+
+
 def test_session_manager_restores_dead_running_pty_as_paused(tmp_path: Path) -> None:
     state_path = tmp_path / "state.json"
     state_path.write_text(json.dumps({

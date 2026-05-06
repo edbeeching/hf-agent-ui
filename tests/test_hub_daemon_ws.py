@@ -132,6 +132,15 @@ def test_browser_ws_rejects_spoofed_local_host_from_remote_client(monkeypatch) -
                 pass
 
 
+def test_browser_ws_rejects_cross_origin_request(monkeypatch) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
+
+    with TestClient(app, base_url="https://hub.example.test:9341") as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws", headers={"Origin": "https://evil.example.test"}):
+                pass
+
+
 def test_daemon_ws_rejects_duplicate_active_name(monkeypatch) -> None:
     monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
 

@@ -150,7 +150,7 @@ Production:  https://edbeeching-hf-agent-ui.hf.space
 
 ### Cloud Agent Hosts
 
-The Space UI can launch an agent host as a Hugging Face Job. The Space-side `HF_TOKEN` and the current user's signed host token are passed server-side to the job; they are not returned to the browser response.
+Cloud agent host support through Hugging Face Jobs is implemented behind a hidden frontend flag while the UX is still being iterated. When enabled, the Space-side `HF_TOKEN` and the current user's signed host token are passed server-side to the job; they are not returned to the browser response.
 
 Optional Space variables:
 
