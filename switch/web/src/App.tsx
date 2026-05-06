@@ -157,7 +157,7 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
   const [daemonHubUrl, setDaemonHubUrl] = useState(window.location.origin)
   const [daemonTokenRequired, setDaemonTokenRequired] = useState(false)
   const [daemonToken, setDaemonToken] = useState<string | null>(null)
-  const installCommand = 'uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git'
+  const [installCommand, setInstallCommand] = useState(DEFAULT_INSTALL_COMMAND)
   const daemonCommand = daemonLaunchCommand(daemonHubUrl, daemonTokenRequired, daemonToken)
 
   useEffect(() => {
@@ -169,6 +169,7 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
           daemonHubUrl?: unknown
           daemonTokenRequired?: unknown
           daemonToken?: unknown
+          installCommand?: unknown
         }
         if (!disposed && typeof info.daemonHubUrl === 'string' && info.daemonHubUrl.trim()) {
           setDaemonHubUrl(info.daemonHubUrl)
@@ -176,6 +177,7 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
         if (!disposed) {
           setDaemonTokenRequired(Boolean(info.daemonTokenRequired))
           setDaemonToken(typeof info.daemonToken === 'string' && info.daemonToken ? info.daemonToken : null)
+          setInstallCommand(typeof info.installCommand === 'string' && info.installCommand ? info.installCommand : DEFAULT_INSTALL_COMMAND)
         }
       } catch {
         // Fall back to the browser URL.
@@ -231,6 +233,8 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
     </div>
   )
 }
+
+const DEFAULT_INSTALL_COMMAND = 'uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git'
 
 interface HfCloudConfig {
   enabled: boolean
@@ -496,13 +500,22 @@ function daemonLaunchCommand(
   daemonTokenRequired: boolean,
   daemonToken: string | null,
 ): string {
+  const hfTokenArg = isHfSpaceUrl(daemonHubUrl) ? ' --hf-token "$HF_TOKEN"' : ''
   if (!daemonTokenRequired) {
-    return `switch host --hub ${daemonHubUrl}`
+    return `switch host --hub ${daemonHubUrl}${hfTokenArg}`
   }
   if (daemonToken) {
-    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}`
+    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}${hfTokenArg}`
   }
-  return `switch host --hub ${daemonHubUrl} --token <token>`
+  return `switch host --hub ${daemonHubUrl} --token <token>${hfTokenArg}`
+}
+
+function isHfSpaceUrl(value: string): boolean {
+  try {
+    return new URL(value).hostname.endsWith('.hf.space')
+  } catch {
+    return false
+  }
 }
 
 function CommandCopyRow({

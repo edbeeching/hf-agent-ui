@@ -4,8 +4,19 @@ from fastapi.testclient import TestClient
 
 from switch.hub.app import app
 
+DEFAULT_INSTALL_COMMAND = "uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git"
+DEV_INSTALL_COMMAND = f"{DEFAULT_INSTALL_COMMAND}@main"
+PROD_INSTALL_COMMAND = f"{DEFAULT_INSTALL_COMMAND}@prod"
+
+
+def clear_install_env(monkeypatch) -> None:
+    monkeypatch.delenv("SWITCH_INSTALL_REF", raising=False)
+    monkeypatch.delenv("SWITCH_INSTALL_REPO_URL", raising=False)
+    monkeypatch.delenv("SWITCH_HF_SPACE_REPO_ID", raising=False)
+
 
 def test_hub_info_uses_configured_daemon_url(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
     monkeypatch.setenv("SWITCH_HUB_DAEMON_URL", "http://192.168.1.50:9341")
     monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
     monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
@@ -17,10 +28,12 @@ def test_hub_info_uses_configured_daemon_url(monkeypatch) -> None:
     assert response.json() == {
         "daemonHubUrl": "http://192.168.1.50:9341",
         "daemonTokenRequired": False,
+        "installCommand": DEFAULT_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_falls_back_to_request_base_url(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
     monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
     monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
     monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
@@ -33,10 +46,12 @@ def test_hub_info_falls_back_to_request_base_url(monkeypatch) -> None:
     assert response.json() == {
         "daemonHubUrl": "http://hub.example.test:9341",
         "daemonTokenRequired": True,
+        "installCommand": DEFAULT_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_prefers_forwarded_public_url(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
     monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
     monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
     monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
@@ -52,10 +67,12 @@ def test_hub_info_prefers_forwarded_public_url(monkeypatch) -> None:
     assert response.json() == {
         "daemonHubUrl": "https://agentic-ui-space.hf.space",
         "daemonTokenRequired": False,
+        "installCommand": PROD_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_forces_https_for_hf_space_host(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
     monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
     monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
     monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
@@ -68,10 +85,32 @@ def test_hub_info_forces_https_for_hf_space_host(monkeypatch) -> None:
     assert response.json() == {
         "daemonHubUrl": "https://edbeeching-agentic-ui.hf.space",
         "daemonTokenRequired": False,
+        "installCommand": PROD_INSTALL_COMMAND,
+    }
+
+
+def test_hub_info_uses_main_install_ref_for_dev_space(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
+    monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
+    monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
+    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+
+    with TestClient(app, base_url="http://internal:7860") as client:
+        response = client.get("/api/hub", headers={
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "edbeeching-agentic-ui-dev.hf.space",
+        })
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "daemonHubUrl": "https://edbeeching-agentic-ui-dev.hf.space",
+        "daemonTokenRequired": False,
+        "installCommand": DEV_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_can_expose_daemon_token_when_enabled(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
     monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
     monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
     monkeypatch.setenv("SWITCH_UNSAFE_EXPOSE_HOST_TOKEN", "1")
@@ -85,10 +124,12 @@ def test_hub_info_can_expose_daemon_token_when_enabled(monkeypatch) -> None:
         "daemonHubUrl": "http://hub.example.test:9341",
         "daemonTokenRequired": True,
         "daemonToken": "secret",
+        "installCommand": DEFAULT_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_does_not_expose_daemon_token_with_legacy_env(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
     monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
     monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
     monkeypatch.setenv("SWITCH_EXPOSE_DAEMON_TOKEN", "1")
@@ -101,6 +142,7 @@ def test_hub_info_does_not_expose_daemon_token_with_legacy_env(monkeypatch) -> N
     assert response.json() == {
         "daemonHubUrl": "http://hub.example.test:9341",
         "daemonTokenRequired": True,
+        "installCommand": DEFAULT_INSTALL_COMMAND,
     }
 
 

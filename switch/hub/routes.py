@@ -12,6 +12,9 @@ from .security import UI_TOKEN_COOKIE, UI_TOKEN_ENV, require_browser_http, shoul
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http)])
 
+INSTALL_REPO_URL = "git+ssh://git@github.com/edbeeching/agentic-ui.git"
+INSTALL_COMMAND_PREFIX = "uv -vv tool install --force --reinstall"
+
 
 def _is_https_request(request: Request) -> bool:
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
@@ -43,6 +46,7 @@ async def hub_info(request: Request) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "daemonHubUrl": daemon_hub_url,
         "daemonTokenRequired": bool(daemon_token),
+        "installCommand": install_command_for_request(request),
     }
     if daemon_token and should_expose_host_token():
         payload["daemonToken"] = daemon_token
@@ -63,6 +67,37 @@ def daemon_hub_url_for_request(request: Request) -> str:
     if daemon_hub_url.startswith("http://") and request.headers.get("host", "").endswith(".hf.space"):
         daemon_hub_url = daemon_hub_url.replace("http://", "https://", 1)
     return daemon_hub_url
+
+
+def install_command_for_request(request: Request) -> str:
+    repo_url = os.environ.get("SWITCH_INSTALL_REPO_URL", INSTALL_REPO_URL).strip() or INSTALL_REPO_URL
+    ref = install_ref_for_request(request)
+    package_url = f"{repo_url}@{ref}" if ref else repo_url
+    return f"{INSTALL_COMMAND_PREFIX} {package_url}"
+
+
+def install_ref_for_request(request: Request) -> str | None:
+    configured_ref = os.environ.get("SWITCH_INSTALL_REF", "").strip()
+    if configured_ref:
+        return configured_ref
+
+    space_repo_id = os.environ.get("SWITCH_HF_SPACE_REPO_ID", "").strip().lower()
+    if space_repo_id.endswith("/agentic-ui-dev"):
+        return "main"
+    if space_repo_id.endswith("/agentic-ui"):
+        return "prod"
+
+    host = _request_host(request)
+    if host.endswith("-dev.hf.space"):
+        return "main"
+    if host.endswith(".hf.space"):
+        return "prod"
+    return None
+
+
+def _request_host(request: Request) -> str:
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return host.split(",", 1)[0].strip().lower().removeprefix("http://").removeprefix("https://").split(":", 1)[0]
 
 
 class HfCloudJobRequest(BaseModel):

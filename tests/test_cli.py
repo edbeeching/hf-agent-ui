@@ -330,10 +330,37 @@ def test_hf_token_defaults_to_env(monkeypatch) -> None:
     assert cli._hf_token(argparse.Namespace()) == "hf-env"
 
 
+def test_hf_token_falls_back_to_hf_login_cache(monkeypatch) -> None:
+    import huggingface_hub
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(huggingface_hub, "get_token", lambda: "cached-hf-token")
+
+    assert cli._hf_token(argparse.Namespace(hf_token=None)) == "cached-hf-token"
+
+
 def test_hf_token_uses_explicit_value(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-env")
 
     assert cli._hf_token(argparse.Namespace(hf_token="hf-explicit")) == "hf-explicit"
+
+
+def test_missing_hf_token_message_explains_private_space_failure() -> None:
+    message = cli._missing_hf_token_message("https://edbeeching-agentic-ui.hf.space", None)
+
+    assert message is not None
+    assert "--hf-token" in message
+    assert "HF_TOKEN" in message
+    assert "HTTP 404" in message
+
+
+def test_missing_hf_token_message_is_skipped_for_non_hf_hub() -> None:
+    assert cli._missing_hf_token_message("http://localhost:9341", None) is None
+
+
+def test_missing_hf_token_message_is_skipped_when_token_present() -> None:
+    assert cli._missing_hf_token_message("https://edbeeching-agentic-ui.hf.space", "hf-token") is None
 
 
 def test_daemon_name_defaults_to_hostname(monkeypatch) -> None:
