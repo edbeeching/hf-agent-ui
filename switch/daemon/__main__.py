@@ -7,7 +7,7 @@ import os
 import platform
 import signal
 
-from switch.hf_auth import resolve_hf_token
+from switch.hf_auth import missing_hf_token_message, resolve_hf_token
 
 from .hub_client import HubDaemonClient
 from .session_manager import SessionManager
@@ -67,7 +67,11 @@ async def run(args: argparse.Namespace) -> None:
     logger = logging.getLogger(__name__)
 
     manager = SessionManager()
-    client = HubDaemonClient(manager, args.hub, name, token=args.token, hf_token=resolve_hf_token(args.hf_token))
+    hf_token = resolve_hf_token(args.hf_token)
+    missing_token_message = missing_hf_token_message(args.hub, hf_token)
+    if missing_token_message:
+        logger.warning(missing_token_message)
+    client = HubDaemonClient(manager, args.hub, name, token=args.token, hf_token=hf_token)
     client_task = asyncio.create_task(client.run_forever())
 
     logger.info("Ready — connecting outbound to hub at %s", args.hub)

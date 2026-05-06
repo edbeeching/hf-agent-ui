@@ -34,7 +34,6 @@ class HubDaemonClient:
         self.token = token
         self.hf_token = hf_token
         self._running = False
-        self._warned_missing_hf_token = False
 
     async def run_forever(self) -> None:
         self._running = True
@@ -69,12 +68,6 @@ class HubDaemonClient:
     async def _connect_once(self) -> None:
         ws_url = _daemon_ws_url(self.hub_url)
         headers = _auth_headers(self.hf_token, host_token=self.token)
-        if _is_hf_space_url(self.hub_url) and not self.hf_token and not self._warned_missing_hf_token:
-            logger.warning(
-                "Private Hugging Face Spaces require HF_TOKEN or --hf-token in addition to --token for agent host "
-                "connections"
-            )
-            self._warned_missing_hf_token = True
         logger.info("Connecting to hub at %s", _daemon_ws_url(self.hub_url))
 
         async with websockets.connect(ws_url, additional_headers=headers) as ws:
