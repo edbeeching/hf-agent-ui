@@ -7,7 +7,7 @@ import os
 import platform
 import signal
 
-from switch.hf_auth import missing_hf_token_message, resolve_hf_token
+from hf_agent_ui.hf_auth import missing_hf_token_message, resolve_hf_token
 
 from .hub_client import HubDaemonClient
 from .session_manager import SessionManager
@@ -19,24 +19,24 @@ def default_daemon_name(args: argparse.Namespace) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="switch host",
-        description="agentic-ui agent host — wraps AI coding sessions (Claude Code, Codex) on this machine",
+        prog="hf-agent-ui host",
+        description="hf-agent-ui agent host — wraps AI coding sessions (Claude Code, Codex) on this machine",
     )
     parser.add_argument(
         "-p", "--port",
         type=int,
-        default=int(os.environ.get("SWITCH_DAEMON_PORT", "9340")),
+        default=int(os.environ.get("HF_AGENT_UI_HOST_PORT", "9340")),
         help="Deprecated; ignored in outbound mode",
     )
     parser.add_argument(
         "--hub",
-        default=os.environ.get("SWITCH_HUB_URL", "http://localhost:9341"),
-        help="Hub URL to register with (default: http://localhost:9341, env: SWITCH_HUB_URL)",
+        default=os.environ.get("HF_AGENT_UI_HUB_URL", "http://localhost:9341"),
+        help="Hub URL to register with (default: http://localhost:9341, env: HF_AGENT_UI_HUB_URL)",
     )
     parser.add_argument(
         "--token",
-        default=os.environ.get("SWITCH_DAEMON_TOKEN"),
-        help="Agent host auth token (env: SWITCH_DAEMON_TOKEN)",
+        default=os.environ.get("HF_AGENT_UI_HOST_TOKEN"),
+        help="Agent host auth token (env: HF_AGENT_UI_HOST_TOKEN)",
     )
     parser.add_argument(
         "--hf-token",
@@ -45,8 +45,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-n", "--name",
-        default=os.environ.get("SWITCH_DAEMON_NAME"),
-        help="Agent host display name (default: hostname, env: SWITCH_DAEMON_NAME)",
+        default=os.environ.get("HF_AGENT_UI_HOST_NAME"),
+        help="Agent host display name (default: hostname, env: HF_AGENT_UI_HOST_NAME)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -61,7 +61,7 @@ async def run(args: argparse.Namespace) -> None:
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[agentic-ui host] %(asctime)s %(levelname)s %(message)s",
+        format="[hf-agent-ui host] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
     logger = logging.getLogger(__name__)

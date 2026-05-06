@@ -1,4 +1,4 @@
-"""Claude Code hook entrypoint for Switch PTY sessions."""
+"""Claude Code hook entrypoint for HF Agent UI PTY sessions."""
 from __future__ import annotations
 
 import json
@@ -8,8 +8,8 @@ from pathlib import Path
 
 
 def main() -> int:
-    session_id = os.environ.get("SWITCH_PTY_SESSION_ID")
-    hook_dir = os.environ.get("SWITCH_CLAUDE_HOOK_DIR")
+    session_id = os.environ.get("HF_AGENT_UI_PTY_SESSION_ID")
+    hook_dir = os.environ.get("HF_AGENT_UI_CLAUDE_HOOK_DIR")
     if not session_id or not hook_dir:
         return 0
 

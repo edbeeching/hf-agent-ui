@@ -9,7 +9,7 @@ from fastapi import WebSocket, WebSocketDisconnect, status
 from .daemon_registry import DaemonInfo, DaemonRegistry
 
 logger = logging.getLogger(__name__)
-HOST_TOKEN_HEADER = "x-agentic-ui-host-token"
+HOST_TOKEN_HEADER = "x-hf-agent-ui-host-token"
 
 MessageCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
 

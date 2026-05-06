@@ -36,7 +36,7 @@ export interface SessionInfo {
   launch_label: string | null
 }
 
-interface SwitchState {
+interface AgentUiState {
   connected: boolean
   daemons: Daemon[]
   sessions: Map<string, SessionInfo[]>
@@ -55,9 +55,9 @@ interface ServerMessage {
   status?: string
 }
 
-export function useSwitch() {
+export function useAgentUi() {
   const wsRef = useRef<WebSocket | null>(null)
-  const [state, setState] = useState<SwitchState>({
+  const [state, setState] = useState<AgentUiState>({
     connected: false,
     daemons: [],
     sessions: new Map(),

@@ -17,7 +17,7 @@ AnySession = PtySession
 class SessionManager:
     def __init__(self, state_path: Path | None = None) -> None:
         self._sessions: dict[str, AnySession] = {}
-        self.state_path = state_path or Path.home() / ".switch" / "sessions.json"
+        self.state_path = state_path or Path.home() / ".hf-agent-ui" / "sessions.json"
         self._load()
 
     def create_pty(

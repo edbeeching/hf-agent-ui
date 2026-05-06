@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react'
-import { useSwitch } from './hooks/useSwitch'
-import type { Daemon } from './hooks/useSwitch'
+import { useAgentUi } from './hooks/useAgentUi'
+import type { Daemon } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { uiAuthFetch } from './auth'
 import './App.css'
 
-const SELECTED_SESSION_STORAGE_KEY = 'switch.selectedSession'
-const RECENT_WORK_DIRS_STORAGE_KEY = 'switch.recentWorkDirs'
+const SELECTED_SESSION_STORAGE_KEY = 'hf-agent-ui.selectedSession'
+const RECENT_WORK_DIRS_STORAGE_KEY = 'hf-agent-ui.recentWorkDirs'
 const MAX_RECENT_WORK_DIRS = 8
 const SHOW_CLOUD_HOSTS = false
 type MobileView = 'terminal' | 'sessions' | 'connect'
 
 function App() {
-  const sw = useSwitch()
+  const sw = useAgentUi()
   const {
     connected,
     daemons,
@@ -66,9 +66,9 @@ function App() {
   }, [activeSelected, connected, subscribeSession])
 
   useEffect(() => {
-    document.title = inputRequiredCount > 0 ? `(${inputRequiredCount}) agentic-ui` : 'agentic-ui'
+    document.title = inputRequiredCount > 0 ? `(${inputRequiredCount}) hf-agent-ui` : 'hf-agent-ui'
     return () => {
-      document.title = 'agentic-ui'
+      document.title = 'hf-agent-ui'
     }
   }, [inputRequiredCount])
 
@@ -76,7 +76,7 @@ function App() {
     <div className="app">
       <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
-          <h1>agentic-ui</h1>
+          <h1>hf-agent-ui</h1>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
             {connected ? 'Connected' : 'Disconnected'}
           </span>
@@ -170,11 +170,11 @@ export default App
 
 function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
   const [copied, setCopied] = useState<string | null>(null)
-  const [daemonHubUrl, setDaemonHubUrl] = useState(window.location.origin)
-  const [daemonTokenRequired, setDaemonTokenRequired] = useState(false)
-  const [daemonToken, setDaemonToken] = useState<string | null>(null)
+  const [hostHubUrl, setDaemonHubUrl] = useState(window.location.origin)
+  const [hostTokenRequired, setDaemonTokenRequired] = useState(false)
+  const [hostToken, setDaemonToken] = useState<string | null>(null)
   const [installCommand, setInstallCommand] = useState(DEFAULT_INSTALL_COMMAND)
-  const daemonCommand = daemonLaunchCommand(daemonHubUrl, daemonTokenRequired, daemonToken)
+  const daemonCommand = daemonLaunchCommand(hostHubUrl, hostTokenRequired, hostToken)
 
   useEffect(() => {
     let disposed = false
@@ -182,17 +182,17 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
       try {
         const res = await uiAuthFetch('/api/hub')
         const info = await res.json() as {
-          daemonHubUrl?: unknown
-          daemonTokenRequired?: unknown
-          daemonToken?: unknown
+          hostHubUrl?: unknown
+          hostTokenRequired?: unknown
+          hostToken?: unknown
           installCommand?: unknown
         }
-        if (!disposed && typeof info.daemonHubUrl === 'string' && info.daemonHubUrl.trim()) {
-          setDaemonHubUrl(info.daemonHubUrl)
+        if (!disposed && typeof info.hostHubUrl === 'string' && info.hostHubUrl.trim()) {
+          setDaemonHubUrl(info.hostHubUrl)
         }
         if (!disposed) {
-          setDaemonTokenRequired(Boolean(info.daemonTokenRequired))
-          setDaemonToken(typeof info.daemonToken === 'string' && info.daemonToken ? info.daemonToken : null)
+          setDaemonTokenRequired(Boolean(info.hostTokenRequired))
+          setDaemonToken(typeof info.hostToken === 'string' && info.hostToken ? info.hostToken : null)
           setInstallCommand(typeof info.installCommand === 'string' && info.installCommand ? info.installCommand : DEFAULT_INSTALL_COMMAND)
         }
       } catch {
@@ -250,7 +250,7 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
   )
 }
 
-const DEFAULT_INSTALL_COMMAND = 'uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git'
+const DEFAULT_INSTALL_COMMAND = 'uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git'
 
 interface HfCloudConfig {
   enabled: boolean
@@ -512,18 +512,18 @@ async function errorText(response: Response): Promise<string> {
 }
 
 function daemonLaunchCommand(
-  daemonHubUrl: string,
-  daemonTokenRequired: boolean,
-  daemonToken: string | null,
+  hostHubUrl: string,
+  hostTokenRequired: boolean,
+  hostToken: string | null,
 ): string {
-  const hfTokenArg = isHfSpaceUrl(daemonHubUrl) ? ' --hf-token "$HF_TOKEN"' : ''
-  if (!daemonTokenRequired) {
-    return `switch host --hub ${daemonHubUrl}${hfTokenArg}`
+  const hfTokenArg = isHfSpaceUrl(hostHubUrl) ? ' --hf-token "$HF_TOKEN"' : ''
+  if (!hostTokenRequired) {
+    return `hf-agent-ui host --hub ${hostHubUrl}${hfTokenArg}`
   }
-  if (daemonToken) {
-    return `switch host --hub ${daemonHubUrl} --token ${daemonToken}${hfTokenArg}`
+  if (hostToken) {
+    return `hf-agent-ui host --hub ${hostHubUrl} --token ${hostToken}${hfTokenArg}`
   }
-  return `switch host --hub ${daemonHubUrl} --token <token>${hfTokenArg}`
+  return `hf-agent-ui host --hub ${hostHubUrl} --token <token>${hfTokenArg}`
 }
 
 function isHfSpaceUrl(value: string): boolean {

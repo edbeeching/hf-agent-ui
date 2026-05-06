@@ -491,7 +491,7 @@ wheels = [
 ]
 
 [[package]]
-name = "switch"
+name = "hf-agent-ui"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

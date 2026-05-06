@@ -7,24 +7,24 @@ import sys
 
 import uvicorn
 
-from switch.cli import _has_browser_auth_configured, _is_public_bind_host
+from hf_agent_ui.cli import _has_browser_auth_configured, _is_public_bind_host
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="switch-hub",
-        description="agentic-ui hub — central server for AI session multiplexing",
+        prog="hf-agent-ui-hub",
+        description="hf-agent-ui hub — central server for AI session multiplexing",
     )
     parser.add_argument(
         "-p", "--port",
         type=int,
-        default=int(os.environ.get("SWITCH_HUB_PORT", "9341")),
-        help="HTTP/WebSocket port to listen on (default: 9341, env: SWITCH_HUB_PORT)",
+        default=int(os.environ.get("HF_AGENT_UI_HUB_PORT", "9341")),
+        help="HTTP/WebSocket port to listen on (default: 9341, env: HF_AGENT_UI_HUB_PORT)",
     )
     parser.add_argument(
         "--host",
-        default=os.environ.get("SWITCH_HUB_HOST", "127.0.0.1"),
-        help="Host to bind to (default: 127.0.0.1, env: SWITCH_HUB_HOST)",
+        default=os.environ.get("HF_AGENT_UI_HUB_HOST", "127.0.0.1"),
+        help="Host to bind to (default: 127.0.0.1, env: HF_AGENT_UI_HUB_HOST)",
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-insecure",
         action="store_true",
-        help="Allow a network-reachable hub without SWITCH_UI_TOKEN",
+        help="Allow a network-reachable hub without HF_AGENT_UI_BROWSER_TOKEN",
     )
     return parser.parse_args()
 
@@ -44,7 +44,7 @@ def main() -> None:
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="[agentic-ui hub] %(asctime)s %(levelname)s %(message)s",
+        format="[hf-agent-ui hub] %(asctime)s %(levelname)s %(message)s",
         datefmt="%H:%M:%S",
     )
 
@@ -56,7 +56,7 @@ def main() -> None:
         sys.exit(2)
 
     uvicorn.run(
-        "switch.hub.app:app",
+        "hf_agent_ui.hub.app:app",
         host=args.host,
         port=args.port,
         log_level="debug" if args.verbose else "info",

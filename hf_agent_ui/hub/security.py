@@ -6,13 +6,13 @@ from urllib.parse import unquote
 
 from fastapi import HTTPException, Request, WebSocket, status
 
-UI_TOKEN_ENV = "SWITCH_UI_TOKEN"
-TRUST_PROXY_AUTH_ENV = "SWITCH_TRUST_PROXY_AUTH"
-UNSAFE_EXPOSE_HOST_TOKEN_ENV = "SWITCH_UNSAFE_EXPOSE_HOST_TOKEN"
+UI_TOKEN_ENV = "HF_AGENT_UI_BROWSER_TOKEN"
+TRUST_PROXY_AUTH_ENV = "HF_AGENT_UI_TRUST_PROXY_AUTH"
+UNSAFE_EXPOSE_HOST_TOKEN_ENV = "HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN"
 
-UI_TOKEN_HEADER = "x-agentic-ui-token"
+UI_TOKEN_HEADER = "x-hf-agent-ui-token"
 UI_TOKEN_QUERY_PARAM = "uiToken"
-UI_TOKEN_COOKIE = "agentic_ui_token"
+UI_TOKEN_COOKIE = "hf_agent_ui_token"
 
 
 def is_browser_http_authorized(request: Request) -> bool:
@@ -32,7 +32,7 @@ def require_browser_http(request: Request) -> None:
     if not is_browser_http_authorized(request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="agentic-ui browser auth required",
+            detail="hf-agent-ui browser auth required",
         )
 
 

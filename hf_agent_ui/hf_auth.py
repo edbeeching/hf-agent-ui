@@ -40,5 +40,5 @@ def missing_hf_token_message(hub_url: str, hf_token: str | None) -> str | None:
         "but private Hugging Face Spaces require --hf-token, HF_TOKEN, HUGGING_FACE_HUB_TOKEN, "
         "or a local Hugging Face login. If your command used --hf-token \"$HF_TOKEN\", make sure "
         "HF_TOKEN is exported and non-empty; otherwise Hugging Face rejects the WebSocket before "
-        "agentic-ui sees it, often as HTTP 404."
+        "hf-agent-ui sees it, often as HTTP 404."
     )

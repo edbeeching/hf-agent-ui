@@ -8,20 +8,20 @@ from typing import Any
 from huggingface_hub import cancel_job, inspect_job, list_jobs, list_jobs_hardware, run_job
 
 HF_TOKEN_ENV = "HF_TOKEN"
-DAEMON_TOKEN_ENV = "SWITCH_DAEMON_TOKEN"
-SPACE_REPO_ENV = "SWITCH_HF_SPACE_REPO_ID"
-JOBS_NAMESPACE_ENV = "SWITCH_HF_JOBS_NAMESPACE"
-DEFAULT_IMAGE_ENV = "SWITCH_HF_JOBS_DEFAULT_IMAGE"
-DEFAULT_FLAVOR_ENV = "SWITCH_HF_JOBS_DEFAULT_FLAVOR"
-DEFAULT_TIMEOUT_ENV = "SWITCH_HF_JOBS_DEFAULT_TIMEOUT"
+DAEMON_TOKEN_ENV = "HF_AGENT_UI_HOST_TOKEN"
+SPACE_REPO_ENV = "HF_AGENT_UI_SPACE_REPO_ID"
+JOBS_NAMESPACE_ENV = "HF_AGENT_UI_JOBS_NAMESPACE"
+DEFAULT_IMAGE_ENV = "HF_AGENT_UI_JOBS_DEFAULT_IMAGE"
+DEFAULT_FLAVOR_ENV = "HF_AGENT_UI_JOBS_DEFAULT_FLAVOR"
+DEFAULT_TIMEOUT_ENV = "HF_AGENT_UI_JOBS_DEFAULT_TIMEOUT"
 
-DEFAULT_SPACE_REPO_ID = "edbeeching/agentic-ui"
+DEFAULT_SPACE_REPO_ID = "edbeeching/hf-agent-ui"
 DEFAULT_IMAGE = "python:3.12"
 DEFAULT_FLAVOR = "cpu-basic"
 DEFAULT_TIMEOUT = "2h"
 
 JOB_LABELS = {
-    "app": "agentic-ui",
+    "app": "hf-agent-ui",
     "purpose": "agent-host",
 }
 
@@ -82,7 +82,7 @@ def list_agent_host_jobs() -> list[dict[str, Any]]:
     filtered = [
         job_to_dict(job)
         for job in jobs
-        if _has_agentic_ui_labels(getattr(job, "labels", None) or {})
+        if _has_hf_agent_ui_labels(getattr(job, "labels", None) or {})
     ]
     return sorted(filtered, key=lambda item: item.get("createdAt") or "", reverse=True)
 
@@ -182,11 +182,11 @@ def _value_or_default(value: str | None, default: str) -> str:
 
 def _job_env(*, hub_url: str, daemon_name: str) -> dict[str, str]:
     env = {
-        "SWITCH_HUB_URL": hub_url,
+        "HF_AGENT_UI_HUB_URL": hub_url,
         SPACE_REPO_ENV: _space_repo_id(),
     }
     if daemon_name:
-        env["SWITCH_DAEMON_NAME"] = daemon_name
+        env["HF_AGENT_UI_HOST_NAME"] = daemon_name
     return env
 
 
@@ -195,15 +195,15 @@ def _bootstrap_script() -> str:
         "import os, subprocess, sys; "
         "subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'huggingface_hub==1.8.0'], check=True); "
         "from huggingface_hub import snapshot_download; "
-        "repo_id = os.environ['SWITCH_HF_SPACE_REPO_ID']; "
+        "repo_id = os.environ['HF_AGENT_UI_SPACE_REPO_ID']; "
         "path = snapshot_download(repo_id=repo_id, repo_type='space', token=os.environ['HF_TOKEN']); "
         "subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', path], check=True); "
-        "name = os.environ['SWITCH_DAEMON_NAME']; "
-        "subprocess.run(['switch', 'host', '--hub', os.environ['SWITCH_HUB_URL'], '--name', name], check=True)"
+        "name = os.environ['HF_AGENT_UI_HOST_NAME']; "
+        "subprocess.run(['hf-agent-ui', 'host', '--hub', os.environ['HF_AGENT_UI_HUB_URL'], '--name', name], check=True)"
     )
 
 
-def _has_agentic_ui_labels(labels: dict[str, Any]) -> bool:
+def _has_hf_agent_ui_labels(labels: dict[str, Any]) -> bool:
     return all(labels.get(key) == value for key, value in JOB_LABELS.items())
 
 

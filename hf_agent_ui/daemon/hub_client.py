@@ -14,7 +14,7 @@ from .session_manager import SessionManager
 from .ws_server import DaemonWsServer
 
 logger = logging.getLogger(__name__)
-HOST_TOKEN_HEADER = "X-Agentic-UI-Host-Token"
+HOST_TOKEN_HEADER = "X-HF-Agent-UI-Host-Token"
 
 
 class HubDaemonClient:
@@ -51,7 +51,7 @@ class HubDaemonClient:
                     logger.error(
                         "Hub connection failed%s, retrying in %.0fs. Private Hugging Face Spaces require "
                         "HF_TOKEN or --hf-token in addition to --token; without it, Hugging Face rejects the "
-                        "WebSocket before agentic-ui sees the request.",
+                        "WebSocket before hf-agent-ui sees the request.",
                         status_suffix,
                         backoff,
                     )

@@ -2,153 +2,131 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from switch.hub.app import app
+from hf_agent_ui.hub.app import app
 
-DEFAULT_INSTALL_COMMAND = "uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git"
+DEFAULT_INSTALL_COMMAND = "uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git"
 DEV_INSTALL_COMMAND = f"{DEFAULT_INSTALL_COMMAND}@main"
 PROD_INSTALL_COMMAND = f"{DEFAULT_INSTALL_COMMAND}@prod"
 
 
 def clear_install_env(monkeypatch) -> None:
-    monkeypatch.delenv("SWITCH_INSTALL_REF", raising=False)
-    monkeypatch.delenv("SWITCH_INSTALL_REPO_URL", raising=False)
-    monkeypatch.delenv("SWITCH_HF_SPACE_REPO_ID", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_INSTALL_REF", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_INSTALL_REPO_URL", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_SPACE_REPO_ID", raising=False)
 
 
 def test_hub_info_uses_configured_daemon_url(monkeypatch) -> None:
     clear_install_env(monkeypatch)
-    monkeypatch.setenv("SWITCH_HUB_DAEMON_URL", "http://192.168.1.50:9341")
-    monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_HUB_URL", "http://192.168.1.50:9341")
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
 
     with TestClient(app) as client:
         response = client.get("/api/hub")
 
     assert response.status_code == 200
     assert response.json() == {
-        "daemonHubUrl": "http://192.168.1.50:9341",
-        "daemonTokenRequired": False,
+        "hostHubUrl": "http://192.168.1.50:9341",
+        "hostTokenRequired": False,
         "installCommand": DEFAULT_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_falls_back_to_request_base_url(monkeypatch) -> None:
     clear_install_env(monkeypatch)
-    monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
-    monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.delenv("HF_AGENT_UI_HUB_URL", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
 
     with TestClient(app, base_url="http://hub.example.test:9341") as client:
         response = client.get("/api/hub")
 
     assert response.status_code == 200
     assert response.json() == {
-        "daemonHubUrl": "http://hub.example.test:9341",
-        "daemonTokenRequired": True,
+        "hostHubUrl": "http://hub.example.test:9341",
+        "hostTokenRequired": True,
         "installCommand": DEFAULT_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_prefers_forwarded_public_url(monkeypatch) -> None:
     clear_install_env(monkeypatch)
-    monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
-    monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.delenv("HF_AGENT_UI_HUB_URL", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
 
     with TestClient(app, base_url="http://internal:7860") as client:
         response = client.get("/api/hub", headers={
             "x-forwarded-proto": "https",
-            "x-forwarded-host": "agentic-ui-space.hf.space",
+            "x-forwarded-host": "hf-agent-ui-space.hf.space",
         })
 
     assert response.status_code == 200
     assert response.json() == {
-        "daemonHubUrl": "https://agentic-ui-space.hf.space",
-        "daemonTokenRequired": False,
+        "hostHubUrl": "https://hf-agent-ui-space.hf.space",
+        "hostTokenRequired": False,
         "installCommand": PROD_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_forces_https_for_hf_space_host(monkeypatch) -> None:
     clear_install_env(monkeypatch)
-    monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
-    monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_EXPOSE_DAEMON_TOKEN", raising=False)
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.delenv("HF_AGENT_UI_HUB_URL", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
 
-    with TestClient(app, base_url="http://edbeeching-agentic-ui.hf.space") as client:
+    with TestClient(app, base_url="http://edbeeching-hf-agent-ui.hf.space") as client:
         response = client.get("/api/hub")
 
     assert response.status_code == 200
     assert response.json() == {
-        "daemonHubUrl": "https://edbeeching-agentic-ui.hf.space",
-        "daemonTokenRequired": False,
+        "hostHubUrl": "https://edbeeching-hf-agent-ui.hf.space",
+        "hostTokenRequired": False,
         "installCommand": PROD_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_uses_main_install_ref_for_dev_space(monkeypatch) -> None:
     clear_install_env(monkeypatch)
-    monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
-    monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.delenv("HF_AGENT_UI_HUB_URL", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
 
     with TestClient(app, base_url="http://internal:7860") as client:
         response = client.get("/api/hub", headers={
             "x-forwarded-proto": "https",
-            "x-forwarded-host": "edbeeching-agentic-ui-dev.hf.space",
+            "x-forwarded-host": "edbeeching-hf-agent-ui-dev.hf.space",
         })
 
     assert response.status_code == 200
     assert response.json() == {
-        "daemonHubUrl": "https://edbeeching-agentic-ui-dev.hf.space",
-        "daemonTokenRequired": False,
+        "hostHubUrl": "https://edbeeching-hf-agent-ui-dev.hf.space",
+        "hostTokenRequired": False,
         "installCommand": DEV_INSTALL_COMMAND,
     }
 
 
 def test_hub_info_can_expose_daemon_token_when_enabled(monkeypatch) -> None:
     clear_install_env(monkeypatch)
-    monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
-    monkeypatch.setenv("SWITCH_UNSAFE_EXPOSE_HOST_TOKEN", "1")
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.delenv("HF_AGENT_UI_HUB_URL", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
+    monkeypatch.setenv("HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN", "1")
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
 
     with TestClient(app, base_url="http://hub.example.test:9341") as client:
         response = client.get("/api/hub")
 
     assert response.status_code == 200
     assert response.json() == {
-        "daemonHubUrl": "http://hub.example.test:9341",
-        "daemonTokenRequired": True,
-        "daemonToken": "secret",
-        "installCommand": DEFAULT_INSTALL_COMMAND,
-    }
-
-
-def test_hub_info_does_not_expose_daemon_token_with_legacy_env(monkeypatch) -> None:
-    clear_install_env(monkeypatch)
-    monkeypatch.delenv("SWITCH_HUB_DAEMON_URL", raising=False)
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
-    monkeypatch.setenv("SWITCH_EXPOSE_DAEMON_TOKEN", "1")
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
-
-    with TestClient(app, base_url="http://hub.example.test:9341") as client:
-        response = client.get("/api/hub")
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "daemonHubUrl": "http://hub.example.test:9341",
-        "daemonTokenRequired": True,
+        "hostHubUrl": "http://hub.example.test:9341",
+        "hostTokenRequired": True,
+        "hostToken": "secret",
         "installCommand": DEFAULT_INSTALL_COMMAND,
     }
 
 
 def test_api_requires_ui_token_for_remote_browser(monkeypatch) -> None:
-    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(app, base_url="http://hub.example.test:9341") as client:
         response = client.get("/api/daemons")
@@ -157,8 +135,8 @@ def test_api_requires_ui_token_for_remote_browser(monkeypatch) -> None:
 
 
 def test_api_rejects_spoofed_local_host_from_remote_client(monkeypatch) -> None:
-    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(
         app,
@@ -171,8 +149,8 @@ def test_api_rejects_spoofed_local_host_from_remote_client(monkeypatch) -> None:
 
 
 def test_api_rejects_proxy_public_host_without_browser_auth(monkeypatch) -> None:
-    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(
         app,
@@ -185,8 +163,8 @@ def test_api_rejects_proxy_public_host_without_browser_auth(monkeypatch) -> None
 
 
 def test_api_allows_local_browser_without_ui_token(monkeypatch) -> None:
-    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(
         app,
@@ -199,18 +177,18 @@ def test_api_allows_local_browser_without_ui_token(monkeypatch) -> None:
 
 
 def test_api_allows_ui_token_header_for_remote_browser(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_BROWSER_TOKEN", "ui-secret")
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(app, base_url="http://hub.example.test:9341") as client:
-        response = client.get("/api/daemons", headers={"X-Agentic-UI-Token": "ui-secret"})
+        response = client.get("/api/daemons", headers={"X-HF-Agent-UI-Token": "ui-secret"})
 
     assert response.status_code == 200
 
 
 def test_auth_cookie_endpoint_sets_httponly_cookie(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_BROWSER_TOKEN", "ui-secret")
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(
         app,
@@ -219,13 +197,13 @@ def test_auth_cookie_endpoint_sets_httponly_cookie(monkeypatch) -> None:
     ) as client:
         response = client.post(
             "/api/auth/browser-cookie",
-            headers={"X-Agentic-UI-Token": "ui-secret"},
+            headers={"X-HF-Agent-UI-Token": "ui-secret"},
         )
         cookie = response.headers["set-cookie"]
 
         assert response.status_code == 200
         assert response.json() == {"cookie": True}
-        assert "agentic_ui_token=ui-secret" in cookie
+        assert "hf_agent_ui_token=ui-secret" in cookie
         assert "HttpOnly" in cookie
         assert "Secure" in cookie
         assert "SameSite=lax" in cookie
@@ -236,8 +214,8 @@ def test_auth_cookie_endpoint_sets_httponly_cookie(monkeypatch) -> None:
 
 
 def test_http_responses_include_security_headers(monkeypatch) -> None:
-    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(app) as client:
         response = client.get("/api/hub")
@@ -249,9 +227,9 @@ def test_http_responses_include_security_headers(monkeypatch) -> None:
 
 
 def test_hf_space_responses_allow_huggingface_embed(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
 
-    with TestClient(app, base_url="https://edbeeching-agentic-ui.hf.space") as client:
+    with TestClient(app, base_url="https://edbeeching-hf-agent-ui.hf.space") as client:
         response = client.get("/api/hub")
 
     assert response.status_code == 200

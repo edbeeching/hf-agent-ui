@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from switch.hub.ws_relay import WsRelay
+from hf_agent_ui.hub.ws_relay import WsRelay
 
 
 def test_session_list_response_targets_requesting_browser_only() -> None:

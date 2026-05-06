@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import type { Daemon, LaunchMode, LaunchOptions } from '../hooks/useSwitch'
+import type { Daemon, LaunchMode, LaunchOptions } from '../hooks/useAgentUi'
 
-const CUSTOM_LAUNCH_STORAGE_KEY = 'switch.customLaunch'
+const CUSTOM_LAUNCH_STORAGE_KEY = 'hf-agent-ui.customLaunch'
 
 interface Props {
   daemons: Daemon[]

@@ -1,6 +1,6 @@
-const UI_TOKEN_STORAGE_KEY = 'agentic-ui.uiToken'
+const UI_TOKEN_STORAGE_KEY = 'hf-agent-ui.uiToken'
 const UI_TOKEN_QUERY_PARAM = 'uiToken'
-const UI_TOKEN_HEADER = 'X-Agentic-UI-Token'
+const UI_TOKEN_HEADER = 'X-HF-Agent-UI-Token'
 
 let uiTokenCookiePromise: Promise<void> | null = null
 let uiTokenCookieValue: string | null = null

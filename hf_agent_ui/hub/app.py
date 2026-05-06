@@ -41,7 +41,7 @@ async def _on_daemon_message(app: FastAPI, daemon_id: str, msg: dict) -> None:
     await relay.on_daemon_message(daemon_id, msg)
 
 
-app = FastAPI(title="agentic-ui Hub", lifespan=lifespan)
+app = FastAPI(title="hf-agent-ui Hub", lifespan=lifespan)
 
 app.include_router(router)
 
@@ -104,11 +104,11 @@ async def ws_endpoint(ws: WebSocket) -> None:
 @app.websocket("/daemon/ws")
 async def daemon_ws_endpoint(ws: WebSocket) -> None:
     pool: DaemonConnectionPool = app.state.pool
-    await pool.handle_daemon(ws, expected_token=os.environ.get("SWITCH_DAEMON_TOKEN"))
+    await pool.handle_daemon(ws, expected_token=os.environ.get("HF_AGENT_UI_HOST_TOKEN"))
 
 
 # Serve bundled web UI (skipped in dev mode — use Vite dev server instead)
-if not os.environ.get("SWITCH_DEV"):
+if not os.environ.get("HF_AGENT_UI_DEV"):
     STATIC_DIR = Path(__file__).parent / "static"
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

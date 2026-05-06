@@ -33,7 +33,7 @@ MAX_OUTPUT_BUFFER_BYTES = 1_000_000
 TUI_PAUSE_EXIT_COMMAND = "/exit\r"
 BASH_PAUSE_EXIT_COMMAND = "exit\r"
 PAUSE_EXIT_GRACE_SECONDS = 5.0
-CUSTOM_LAUNCH_SHELL_ENV = "SWITCH_CUSTOM_LAUNCH_SHELL"
+CUSTOM_LAUNCH_SHELL_ENV = "HF_AGENT_UI_CUSTOM_LAUNCH_SHELL"
 
 TOOL_COMMANDS: dict[str, list[str]] = {
     "bash": ["bash"],
@@ -465,14 +465,14 @@ class PtySession:
             await self._mark_input_required(reason, "pty")
 
     def _prepare_claude_notification_hook(self, env: dict[str, str]) -> Path | None:
-        hook_dir = Path(tempfile.gettempdir()) / "switch-claude-hooks"
+        hook_dir = Path(tempfile.gettempdir()) / "hf-agent-ui-claude-hooks"
         hook_dir.mkdir(parents=True, exist_ok=True)
         hook_file = hook_dir / f"{self.id}.jsonl"
         hook_file.touch(exist_ok=True)
 
-        env["SWITCH_PTY_SESSION_ID"] = self.id
-        env["SWITCH_CLAUDE_HOOK_DIR"] = str(hook_dir)
-        env["SWITCH_PYTHON"] = sys.executable
+        env["HF_AGENT_UI_PTY_SESSION_ID"] = self.id
+        env["HF_AGENT_UI_CLAUDE_HOOK_DIR"] = str(hook_dir)
+        env["HF_AGENT_UI_PYTHON"] = sys.executable
 
         try:
             self._install_claude_notification_hook()
@@ -487,7 +487,7 @@ class PtySession:
             return
         settings_dir = work_dir / ".claude"
         settings_file = settings_dir / "settings.local.json"
-        command = f"{shlex.quote(sys.executable)} -m switch.daemon.claude_hook"
+        command = f"{shlex.quote(sys.executable)} -m hf_agent_ui.daemon.claude_hook"
 
         settings: dict[str, Any] = {}
         if settings_file.exists():

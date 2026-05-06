@@ -12,7 +12,7 @@ from .security import UI_TOKEN_COOKIE, UI_TOKEN_ENV, require_browser_http, shoul
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http)])
 
-INSTALL_REPO_URL = "git+ssh://git@github.com/edbeeching/agentic-ui.git"
+INSTALL_REPO_URL = "git+https://github.com/edbeeching/hf-agent-ui.git"
 INSTALL_COMMAND_PREFIX = "uv -vv tool install --force --reinstall"
 
 
@@ -42,19 +42,19 @@ async def set_browser_auth_cookie(request: Request, response: Response) -> dict[
 @router.get("/hub")
 async def hub_info(request: Request) -> dict[str, Any]:
     daemon_hub_url = daemon_hub_url_for_request(request)
-    daemon_token = os.environ.get("SWITCH_DAEMON_TOKEN")
+    daemon_token = os.environ.get("HF_AGENT_UI_HOST_TOKEN")
     payload: dict[str, Any] = {
-        "daemonHubUrl": daemon_hub_url,
-        "daemonTokenRequired": bool(daemon_token),
+        "hostHubUrl": daemon_hub_url,
+        "hostTokenRequired": bool(daemon_token),
         "installCommand": install_command_for_request(request),
     }
     if daemon_token and should_expose_host_token():
-        payload["daemonToken"] = daemon_token
+        payload["hostToken"] = daemon_token
     return payload
 
 
 def daemon_hub_url_for_request(request: Request) -> str:
-    daemon_hub_url = os.environ.get("SWITCH_HUB_DAEMON_URL")
+    daemon_hub_url = os.environ.get("HF_AGENT_UI_HUB_URL")
     if daemon_hub_url:
         return daemon_hub_url
 
@@ -70,21 +70,21 @@ def daemon_hub_url_for_request(request: Request) -> str:
 
 
 def install_command_for_request(request: Request) -> str:
-    repo_url = os.environ.get("SWITCH_INSTALL_REPO_URL", INSTALL_REPO_URL).strip() or INSTALL_REPO_URL
+    repo_url = os.environ.get("HF_AGENT_UI_INSTALL_REPO_URL", INSTALL_REPO_URL).strip() or INSTALL_REPO_URL
     ref = install_ref_for_request(request)
     package_url = f"{repo_url}@{ref}" if ref else repo_url
     return f"{INSTALL_COMMAND_PREFIX} {package_url}"
 
 
 def install_ref_for_request(request: Request) -> str | None:
-    configured_ref = os.environ.get("SWITCH_INSTALL_REF", "").strip()
+    configured_ref = os.environ.get("HF_AGENT_UI_INSTALL_REF", "").strip()
     if configured_ref:
         return configured_ref
 
-    space_repo_id = os.environ.get("SWITCH_HF_SPACE_REPO_ID", "").strip().lower()
-    if space_repo_id.endswith("/agentic-ui-dev"):
+    space_repo_id = os.environ.get("HF_AGENT_UI_SPACE_REPO_ID", "").strip().lower()
+    if space_repo_id.endswith("/hf-agent-ui-dev"):
         return "main"
-    if space_repo_id.endswith("/agentic-ui"):
+    if space_repo_id.endswith("/hf-agent-ui"):
         return "prod"
 
     host = _request_host(request)
