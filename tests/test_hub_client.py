@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from switch.daemon.hub_client import _auth_headers, _daemon_ws_url, _is_hf_space_url
+from switch.daemon.hub_client import _auth_headers, _daemon_ws_url, _is_hf_space_url, _websocket_status_code
 
 
 def test_daemon_ws_url_uses_ws_for_http() -> None:
@@ -43,3 +43,7 @@ def test_auth_headers_are_none_without_tokens() -> None:
 def test_is_hf_space_url() -> None:
     assert _is_hf_space_url("https://edbeeching-agentic-ui.hf.space")
     assert not _is_hf_space_url("https://huggingface.co/spaces/edbeeching/agentic-ui")
+
+
+def test_websocket_status_code_parses_invalid_status_message() -> None:
+    assert _websocket_status_code(RuntimeError("server rejected WebSocket connection: HTTP 404")) == 404
