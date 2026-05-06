@@ -6,6 +6,7 @@ on:
       - CI
     branches:
       - main
+      - prod
     types:
       - completed
   workflow_dispatch:
@@ -14,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hf-space-deploy
+  group: hf-space-deploy-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -22,9 +23,6 @@ jobs:
     name: Upload Space
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-
-    env:
-      HF_SPACE_ID: edbeeching/agentic-ui
 
     steps:
       - name: Checkout CI commit
@@ -58,10 +56,19 @@ jobs:
           if not token:
               raise SystemExit("Missing required GitHub secret: HF_TOKEN")
 
-          repo_id = os.environ["HF_SPACE_ID"]
           with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
               event = json.load(f)
-          sha = event.get("workflow_run", {}).get("head_sha") or os.environ["GITHUB_SHA"]
+          workflow_run = event.get("workflow_run", {})
+          branch = workflow_run.get("head_branch") or os.environ["GITHUB_REF_NAME"]
+          sha = workflow_run.get("head_sha") or os.environ["GITHUB_SHA"]
+          space_by_branch = {
+              "main": "edbeeching/agentic-ui-dev",
+              "prod": "edbeeching/agentic-ui",
+          }
+          repo_id = space_by_branch.get(branch)
+          if not repo_id:
+              raise SystemExit(f"No Hugging Face Space target configured for branch: {branch}")
+
           repo = os.environ["GITHUB_REPOSITORY"]
           server = os.environ["GITHUB_SERVER_URL"]
           run_id = os.environ["GITHUB_RUN_ID"]
@@ -89,10 +96,11 @@ jobs:
               allow_patterns=managed_patterns,
               delete_patterns=managed_patterns,
               ignore_patterns=ignored_patterns,
-              commit_message=f"Deploy agentic-ui {sha[:7]}",
+              commit_message=f"Deploy agentic-ui {branch} {sha[:7]}",
               commit_description=(
                   f"Source: {server}/{repo}/commit/{sha}\n"
                   f"Run: {server}/{repo}/actions/runs/{run_id}\n"
+                  f"Branch: {branch}\n"
               ),
           )
           PY
