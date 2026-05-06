@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import type { InputRequiredKind } from '../hooks/useAgentUi'
 import 'xterm/css/xterm.css'
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
   visible?: boolean
   needsInput?: boolean
   inputReason?: string | null
+  inputKind?: InputRequiredKind | null
   tool?: string
 }
 
@@ -23,6 +25,7 @@ export function TerminalView({
   visible = true,
   needsInput = false,
   inputReason = null,
+  inputKind = null,
   tool,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -139,7 +142,9 @@ export function TerminalView({
     <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`}>
       {needsInput && (
         <div className="input-required-banner" role="status">
-          <span className="input-required-banner-label">Input needed</span>
+          <span className={`input-required-banner-label ${inputKind || 'prompt'}`}>
+            {inputKindLabel(inputKind)}
+          </span>
           <span className="input-required-banner-reason">
             {inputReason || `${toolLabel(tool)} is waiting for a response`}
           </span>
@@ -158,4 +163,11 @@ function toolLabel(tool?: string): string {
   if (tool === 'codex') return 'Codex'
   if (tool === 'bash') return 'Bash'
   return 'Claude'
+}
+
+function inputKindLabel(kind: InputRequiredKind | null): string {
+  if (kind === 'permission') return 'Permission'
+  if (kind === 'confirmation') return 'Confirm'
+  if (kind === 'auth') return 'Auth'
+  return 'Input needed'
 }

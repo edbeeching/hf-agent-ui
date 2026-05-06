@@ -9,7 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from hf_agent_ui.daemon.pty_session import TOOL_COMMANDS, PtySession
+from hf_agent_ui.daemon.pty_session import (
+    TOOL_COMMANDS,
+    PtySession,
+    _codex_hook_config_args,
+    _detect_claude_notification,
+    _detect_codex_permission_request,
+)
 
 
 MOCK_CLI = str(Path(__file__).parent / "mock_cli.py")
@@ -90,6 +96,68 @@ def test_bash_tool_builds_plain_shell_command(tmp_path: Path) -> None:
     assert session._build_tool_args(["bash"], resume=False) == ["bash"]
     assert session._build_tool_args(["bash"], resume=True) == ["bash"]
     assert session._pause_exit_command() == "exit\r"
+
+
+def test_codex_hook_config_is_added_when_hook_enabled(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path), tool="codex")
+    session._codex_hook_enabled = True
+
+    args = session._build_tool_args(["codex"], resume=False)
+
+    assert args[0] == "codex"
+    assert "-c" in args
+    assert "features.codex_hooks=true" in args
+    assert any("hooks.PermissionRequest" in arg for arg in args)
+    assert args[-2:] == ["--cd", str(tmp_path.resolve())]
+
+
+def test_codex_hook_config_runs_hf_agent_ui_hook() -> None:
+    config_args = _codex_hook_config_args()
+
+    assert "features.codex_hooks=true" in config_args
+    assert any("hf_agent_ui.daemon.codex_hook" in arg for arg in config_args)
+
+
+def test_claude_notification_type_maps_to_input_signal() -> None:
+    signal = _detect_claude_notification({
+        "hook_event_name": "Notification",
+        "notification_type": "permission_prompt",
+        "title": "Permission needed",
+        "message": "Claude needs your permission to use Bash",
+    })
+
+    assert signal is not None
+    assert signal.kind == "permission"
+    assert signal.title == "Permission needed"
+    assert signal.reason == "Claude needs your permission to use Bash"
+
+
+def test_claude_idle_notification_maps_to_prompt_signal() -> None:
+    signal = _detect_claude_notification({
+        "hook_event_name": "Notification",
+        "notification_type": "idle_prompt",
+        "message": "Claude is waiting for your input",
+    })
+
+    assert signal is not None
+    assert signal.kind == "prompt"
+    assert "waiting" in signal.reason.lower()
+
+
+def test_codex_permission_request_maps_to_input_signal() -> None:
+    signal = _detect_codex_permission_request({
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {
+            "description": "Run tests outside the sandbox",
+            "command": "pytest",
+        },
+    })
+
+    assert signal.kind == "permission"
+    assert signal.title == "Codex approval required"
+    assert signal.reason == "Run tests outside the sandbox"
+    assert signal.tool_name == "Bash"
 
 
 def test_terminate_process_targets_process_group(monkeypatch, tmp_path: Path) -> None:
