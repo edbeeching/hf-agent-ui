@@ -10,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .daemon_connection import DaemonConnectionPool
 from .daemon_registry import DaemonRegistry
+from .routes import public_router
 from .routes import router
-from .security import is_browser_ws_authorized
+from .security import current_browser_ws_user, oauth_routes_enabled
 from .ws_relay import WsRelay
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,15 @@ async def _on_daemon_message(app: FastAPI, daemon_id: str, msg: dict) -> None:
 
 app = FastAPI(title="hf-agent-ui Hub", lifespan=lifespan)
 
+if oauth_routes_enabled():
+    try:
+        from huggingface_hub import attach_huggingface_oauth
+
+        attach_huggingface_oauth(app)
+    except Exception:
+        logger.exception("Failed to attach Hugging Face OAuth routes")
+
+app.include_router(public_router)
 app.include_router(router)
 
 
@@ -94,11 +104,12 @@ def _strip_port(host: str) -> str:
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
-    if not is_browser_ws_authorized(ws):
+    user = current_browser_ws_user(ws)
+    if user is None:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     relay: WsRelay = app.state.relay
-    await relay.handle_browser(ws)
+    await relay.handle_browser(ws, user)
 
 
 @app.websocket("/daemon/ws")

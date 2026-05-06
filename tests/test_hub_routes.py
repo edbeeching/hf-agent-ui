@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from hf_agent_ui.hub.app import app
+from hf_agent_ui.hub.security import UserIdentity, require_browser_http, require_browser_user, user_from_host_token
 
 DEFAULT_INSTALL_COMMAND = "uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git"
 DEV_INSTALL_COMMAND = f"{DEFAULT_INSTALL_COMMAND}@main"
@@ -122,6 +123,33 @@ def test_hub_info_can_expose_daemon_token_when_enabled(monkeypatch) -> None:
         "hostToken": "secret",
         "installCommand": DEFAULT_INSTALL_COMMAND,
     }
+
+
+def test_hub_info_returns_per_user_host_token_in_oauth_mode(monkeypatch) -> None:
+    clear_install_env(monkeypatch)
+    user = UserIdentity(sub="hf-user-123", username="edward", display_name="Edward")
+    monkeypatch.setenv("HF_AGENT_UI_AUTH_MODE", "hf-oauth")
+    monkeypatch.setenv("HF_AGENT_UI_USER_TOKEN_SECRET", "signing-secret")
+    monkeypatch.delenv("HF_AGENT_UI_HUB_URL", raising=False)
+    app.dependency_overrides[require_browser_http] = lambda: None
+    app.dependency_overrides[require_browser_user] = lambda: user
+
+    try:
+        with TestClient(app, base_url="https://edbeeching-hf-agent-ui.hf.space") as client:
+            response = client.get("/api/hub")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hostHubUrl"] == "https://edbeeching-hf-agent-ui.hf.space"
+    assert payload["hostTokenRequired"] is True
+    assert payload["installCommand"] == PROD_INSTALL_COMMAND
+    assert user_from_host_token(payload["hostToken"]) == UserIdentity(
+        sub="hf-user-123",
+        username="edward",
+        display_name="edward",
+    )
 
 
 def test_api_requires_ui_token_for_remote_browser(monkeypatch) -> None:

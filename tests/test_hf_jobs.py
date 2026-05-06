@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from hf_agent_ui.hub import hf_jobs
 from hf_agent_ui.hub.app import app
+from hf_agent_ui.hub.security import UserIdentity
 
 
 @dataclass
@@ -60,6 +61,31 @@ def test_hf_jobs_config_reports_missing_env(monkeypatch) -> None:
     assert payload["defaults"]["spaceRepoId"] == "edbeeching/hf-agent-ui"
 
 
+def test_hf_jobs_config_oauth_does_not_require_shared_host_token(monkeypatch) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_AUTH_MODE", "hf-oauth")
+    monkeypatch.setenv("HF_AGENT_UI_USER_TOKEN_SECRET", "signing-secret")
+    monkeypatch.setenv("HF_TOKEN", "hf-secret")
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
+
+    payload = hf_jobs.config_payload()
+
+    assert payload["enabled"] is True
+    assert payload["missingConfig"] == []
+
+
+def test_hf_jobs_config_oauth_requires_user_token_secret(monkeypatch) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_AUTH_MODE", "hf-oauth")
+    monkeypatch.setenv("HF_TOKEN", "hf-secret")
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_USER_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("OAUTH_CLIENT_SECRET", raising=False)
+
+    payload = hf_jobs.config_payload()
+
+    assert payload["enabled"] is False
+    assert payload["missingConfig"] == ["HF_AGENT_UI_USER_TOKEN_SECRET"]
+
+
 def test_hf_jobs_start_injects_secrets_and_bootstrap_command(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-secret")
     monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "daemon-secret")
@@ -71,7 +97,7 @@ def test_hf_jobs_start_injects_secrets_and_bootstrap_command(monkeypatch) -> Non
         return FakeJob(
             id="job-12345678",
             status=FakeStatus("RUNNING"),
-            labels={**hf_jobs.JOB_LABELS, "daemon_name": "gpu-box"},
+            labels=kwargs["labels"],
         )
 
     monkeypatch.setattr(hf_jobs, "run_job", fake_run_job)
@@ -104,6 +130,11 @@ def test_hf_jobs_start_injects_secrets_and_bootstrap_command(monkeypatch) -> Non
     }
     assert call["labels"]["app"] == "hf-agent-ui"
     assert call["labels"]["purpose"] == "agent-host"
+    assert call["labels"]["owner_sub_hash"] == hf_jobs._owner_label(UserIdentity(
+        sub="single-user",
+        username="single-user",
+        display_name="Single user",
+    ))
     assert "'hf-agent-ui', 'host'" in call["command"][2]
     assert "daemon-secret" not in str(payload)
     assert "hf-secret" not in str(payload)
@@ -130,6 +161,36 @@ def test_hf_jobs_start_generates_name_when_omitted(monkeypatch) -> None:
     assert payload["daemonName"] == "hf-container-1234abcd"
     assert calls[0]["env"]["HF_AGENT_UI_HOST_NAME"] == "hf-container-1234abcd"
     assert calls[0]["labels"]["daemon_name"] == "hf-container-1234abcd"
+
+
+def test_hf_jobs_start_oauth_labels_owner_and_uses_user_token(monkeypatch) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_AUTH_MODE", "hf-oauth")
+    monkeypatch.setenv("HF_AGENT_UI_USER_TOKEN_SECRET", "signing-secret")
+    monkeypatch.setenv("HF_TOKEN", "hf-secret")
+    user = UserIdentity(sub="alice-sub", username="alice", display_name="Alice")
+    calls: list[dict[str, Any]] = []
+
+    def fake_run_job(**kwargs):
+        calls.append(kwargs)
+        return FakeJob(
+            id="job-12345678",
+            status=FakeStatus("RUNNING"),
+            labels=kwargs["labels"],
+        )
+
+    monkeypatch.setattr(hf_jobs, "run_job", fake_run_job)
+
+    payload = hf_jobs.start_agent_host_job(
+        hub_url="https://edbeeching-hf-agent-ui.hf.space",
+        owner=user,
+        host_token="alice-host-token",
+        name="alice-host",
+    )
+
+    assert payload["daemonName"] == "alice-host"
+    assert calls[0]["secrets"]["HF_AGENT_UI_HOST_TOKEN"] == "alice-host-token"
+    assert calls[0]["labels"]["owner_sub_hash"] == hf_jobs._owner_label(user)
+    assert calls[0]["labels"]["owner_username"] == "alice"
 
 
 def test_hf_jobs_list_filters_hf_agent_ui_jobs(monkeypatch) -> None:
@@ -179,12 +240,40 @@ def test_hf_jobs_hardware_normalizes_accelerators(monkeypatch) -> None:
 def test_hf_jobs_cancel_calls_client(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-secret")
     calls = []
+    monkeypatch.setattr(
+        hf_jobs,
+        "inspect_job",
+        lambda **kwargs: FakeJob("job-123", FakeStatus("RUNNING"), {**hf_jobs.JOB_LABELS, "daemon_name": "agent"}),
+    )
     monkeypatch.setattr(hf_jobs, "cancel_job", lambda **kwargs: calls.append(kwargs))
 
     payload = hf_jobs.cancel_agent_host_job("job-123")
 
     assert payload == {"status": "cancelling", "jobId": "job-123"}
     assert calls == [{"job_id": "job-123", "namespace": None, "token": "hf-secret"}]
+
+
+def test_hf_jobs_list_filters_by_owner(monkeypatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf-secret")
+    alice = UserIdentity(sub="alice-sub", username="alice", display_name="Alice")
+    bob = UserIdentity(sub="bob-sub", username="bob", display_name="Bob")
+
+    monkeypatch.setattr(hf_jobs, "list_jobs", lambda **kwargs: [
+        FakeJob("alice-job", FakeStatus("RUNNING"), {
+            **hf_jobs.JOB_LABELS,
+            "daemon_name": "alice-host",
+            hf_jobs.OWNER_LABEL: hf_jobs._owner_label(alice),
+        }),
+        FakeJob("bob-job", FakeStatus("RUNNING"), {
+            **hf_jobs.JOB_LABELS,
+            "daemon_name": "bob-host",
+            hf_jobs.OWNER_LABEL: hf_jobs._owner_label(bob),
+        }),
+    ])
+
+    payload = hf_jobs.list_agent_host_jobs(owner=alice)
+
+    assert [job["id"] for job in payload] == ["alice-job"]
 
 
 def test_hf_jobs_routes_do_not_expose_secrets(monkeypatch) -> None:

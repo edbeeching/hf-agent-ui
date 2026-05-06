@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+
+from .security import SINGLE_USER_NAME, SINGLE_USER_SUB, UserIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,8 @@ class DaemonInfo:
     hostname: str
     registered_at: str
     last_seen: str
+    owner_sub: str = SINGLE_USER_SUB
+    owner_username: str = SINGLE_USER_NAME
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,10 +43,22 @@ class DaemonRegistry:
         self._daemons: dict[str, DaemonInfo] = {}
         self._prune_task: asyncio.Task | None = None
 
-    def register(self, name: str, host: str, port: int, hostname: str) -> DaemonInfo:
+    def register(
+        self,
+        name: str,
+        host: str,
+        port: int,
+        hostname: str,
+        owner: UserIdentity | None = None,
+    ) -> DaemonInfo:
+        owner = owner or UserIdentity(
+            sub=SINGLE_USER_SUB,
+            username=SINGLE_USER_NAME,
+            display_name=SINGLE_USER_NAME,
+        )
         # Check if a daemon with the same name already exists — update it
         for d in self._daemons.values():
-            if d.name == name:
+            if d.name == name and d.owner_sub == owner.sub:
                 now = datetime.now(timezone.utc).isoformat()
                 d.host = host
                 d.port = port
@@ -61,6 +77,8 @@ class DaemonRegistry:
             hostname=hostname,
             registered_at=now,
             last_seen=now,
+            owner_sub=owner.sub,
+            owner_username=owner.username,
         )
         self._daemons[daemon_id] = info
         logger.info("Registered new daemon %s (id=%s) at %s:%d", name, daemon_id, host, port)
@@ -76,8 +94,16 @@ class DaemonRegistry:
     def get(self, daemon_id: str) -> DaemonInfo | None:
         return self._daemons.get(daemon_id)
 
-    def list(self) -> list[dict[str, Any]]:
-        return [d.to_dict() for d in self._daemons.values()]
+    def list(self, owner_sub: str | None = None) -> list[dict[str, Any]]:
+        return [
+            d.to_dict()
+            for d in self._daemons.values()
+            if owner_sub is None or d.owner_sub == owner_sub
+        ]
+
+    def owns(self, daemon_id: str, owner_sub: str) -> bool:
+        daemon = self._daemons.get(daemon_id)
+        return daemon is not None and daemon.owner_sub == owner_sub
 
     def remove(self, daemon_id: str) -> bool:
         return self._daemons.pop(daemon_id, None) is not None

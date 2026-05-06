@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from hf_agent_ui.hub.app import app
+from hf_agent_ui.hub.security import UserIdentity, user_host_token
 
 
 def test_daemon_ws_requires_configured_token(monkeypatch) -> None:
@@ -161,3 +162,33 @@ def test_daemon_ws_rejects_duplicate_active_name(monkeypatch) -> None:
             assert daemons[0]["id"] == first["daemonId"]
             assert daemons[0]["hostname"] == "devbox-1"
             assert daemons[0]["connected"] is True
+
+
+def test_daemon_ws_allows_same_name_for_different_oauth_users(monkeypatch) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_AUTH_MODE", "hf-oauth")
+    monkeypatch.setenv("HF_AGENT_UI_USER_TOKEN_SECRET", "signing-secret")
+    alice_token = user_host_token(UserIdentity(sub="alice-sub", username="alice", display_name="Alice"))
+    bob_token = user_host_token(UserIdentity(sub="bob-sub", username="bob", display_name="Bob"))
+
+    with TestClient(app) as client:
+        with (
+            client.websocket_connect(f"/daemon/ws?token={alice_token}") as alice_ws,
+            client.websocket_connect(f"/daemon/ws?token={bob_token}") as bob_ws,
+        ):
+            alice_ws.send_json({
+                "type": "daemon.register",
+                "name": "login-node",
+                "hostname": "alice-box",
+            })
+            alice = alice_ws.receive_json()
+            assert alice["type"] == "daemon.registered"
+
+            bob_ws.send_json({
+                "type": "daemon.register",
+                "name": "login-node",
+                "hostname": "bob-box",
+            })
+            bob = bob_ws.receive_json()
+            assert bob["type"] == "daemon.registered"
+
+    assert alice["daemonId"] != bob["daemonId"]

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import os
 import secrets
+import hashlib
 from datetime import datetime
 from typing import Any
 
 from huggingface_hub import cancel_job, inspect_job, list_jobs, list_jobs_hardware, run_job
+
+from .security import SINGLE_USER, USER_TOKEN_SECRET_ENV, UserIdentity, auth_mode, has_user_token_secret
 
 HF_TOKEN_ENV = "HF_TOKEN"
 DAEMON_TOKEN_ENV = "HF_AGENT_UI_HOST_TOKEN"
@@ -24,6 +27,8 @@ JOB_LABELS = {
     "app": "hf-agent-ui",
     "purpose": "agent-host",
 }
+OWNER_LABEL = "owner_sub_hash"
+OWNER_USERNAME_LABEL = "owner_username"
 
 
 def config_payload() -> dict[str, Any]:
@@ -49,12 +54,16 @@ def list_hardware() -> list[dict[str, Any]]:
 def start_agent_host_job(
     *,
     hub_url: str,
+    owner: UserIdentity | None = None,
+    host_token: str | None = None,
     image: str | None = None,
     flavor: str | None = None,
     timeout: str | None = None,
     name: str | None = None,
 ) -> dict[str, Any]:
     _require_config()
+    owner = owner or SINGLE_USER
+    host_token = host_token if host_token is not None else _daemon_token()
     daemon_name = _normalize_name(name) or _generated_name()
     job = run_job(
         image=_value_or_default(image, _default_image()),
@@ -62,13 +71,15 @@ def start_agent_host_job(
         env=_job_env(hub_url=hub_url, daemon_name=daemon_name),
         secrets={
             HF_TOKEN_ENV: _hf_token(),
-            DAEMON_TOKEN_ENV: _daemon_token(),
+            DAEMON_TOKEN_ENV: host_token or "",
         },
         flavor=_value_or_default(flavor, _default_flavor()),
         timeout=_value_or_default(timeout, _default_timeout()),
         labels={
             **JOB_LABELS,
             "daemon_name": daemon_name,
+            OWNER_LABEL: _owner_label(owner),
+            OWNER_USERNAME_LABEL: _safe_label_value(owner.username),
         },
         namespace=_jobs_namespace(),
         token=_hf_token(),
@@ -76,13 +87,15 @@ def start_agent_host_job(
     return job_to_dict(job)
 
 
-def list_agent_host_jobs() -> list[dict[str, Any]]:
+def list_agent_host_jobs(owner: UserIdentity | None = None) -> list[dict[str, Any]]:
     _require_hf_token()
+    owner = owner or SINGLE_USER
     jobs = list_jobs(namespace=_jobs_namespace(), token=_hf_token())
     filtered = [
         job_to_dict(job)
         for job in jobs
         if _has_hf_agent_ui_labels(getattr(job, "labels", None) or {})
+        and _job_owner_matches(getattr(job, "labels", None) or {}, owner)
     ]
     return sorted(filtered, key=lambda item: item.get("createdAt") or "", reverse=True)
 
@@ -92,8 +105,12 @@ def get_job(job_id: str) -> dict[str, Any]:
     return job_to_dict(inspect_job(job_id=job_id, namespace=_jobs_namespace(), token=_hf_token()))
 
 
-def cancel_agent_host_job(job_id: str) -> dict[str, Any]:
+def cancel_agent_host_job(job_id: str, owner: UserIdentity | None = None) -> dict[str, Any]:
     _require_hf_token()
+    owner = owner or SINGLE_USER
+    job = inspect_job(job_id=job_id, namespace=_jobs_namespace(), token=_hf_token())
+    if not _job_owner_matches(getattr(job, "labels", None) or {}, owner):
+        raise HfJobsPermissionError("HF Job is not owned by the current user")
     cancel_job(job_id=job_id, namespace=_jobs_namespace(), token=_hf_token())
     return {"status": "cancelling", "jobId": job_id}
 
@@ -122,8 +139,10 @@ def _missing_config() -> list[str]:
     missing = []
     if not _hf_token():
         missing.append(HF_TOKEN_ENV)
-    if not _daemon_token():
+    if auth_mode() == "single" and not _daemon_token():
         missing.append(DAEMON_TOKEN_ENV)
+    if auth_mode() == "hf-oauth" and not has_user_token_secret():
+        missing.append(USER_TOKEN_SECRET_ENV)
     return missing
 
 
@@ -207,11 +226,26 @@ def _has_hf_agent_ui_labels(labels: dict[str, Any]) -> bool:
     return all(labels.get(key) == value for key, value in JOB_LABELS.items())
 
 
+def _job_owner_matches(labels: dict[str, Any], owner: UserIdentity) -> bool:
+    owner_label = labels.get(OWNER_LABEL)
+    if not owner_label:
+        return owner.sub == SINGLE_USER.sub
+    return owner_label == _owner_label(owner)
+
+
+def _owner_label(owner: UserIdentity) -> str:
+    return hashlib.sha256(owner.sub.encode()).hexdigest()[:24]
+
+
+def _safe_label_value(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value)[:63] or "user"
+
+
 def _safe_labels(labels: dict[str, Any]) -> dict[str, str]:
     return {
         str(key): str(value)
         for key, value in labels.items()
-        if key in {"app", "purpose", "daemon_name"}
+        if key in {"app", "purpose", "daemon_name", OWNER_LABEL, OWNER_USERNAME_LABEL}
     }
 
 
@@ -249,4 +283,8 @@ def _hardware_to_dict(item: Any) -> dict[str, Any]:
 
 
 class HfJobsConfigError(RuntimeError):
+    pass
+
+
+class HfJobsPermissionError(RuntimeError):
     pass

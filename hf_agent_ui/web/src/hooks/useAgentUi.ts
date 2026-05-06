@@ -75,7 +75,7 @@ interface InputRequiredUpdate {
   detectedAt: string | null
 }
 
-export function useAgentUi() {
+export function useAgentUi(enabled = true) {
   const wsRef = useRef<WebSocket | null>(null)
   const [state, setState] = useState<AgentUiState>({
     connected: false,
@@ -85,6 +85,7 @@ export function useAgentUi() {
   })
 
   const fetchDaemons = useCallback(async () => {
+    if (!enabled) return
     try {
       const res = await uiAuthFetch('/api/daemons')
       const daemons: Daemon[] = await res.json()
@@ -101,7 +102,7 @@ export function useAgentUi() {
     } catch {
       // Hub not available
     }
-  }, [])
+  }, [enabled])
 
   const updateSessionStatus = useCallback((sessionId: string, status: string) => {
     setState(s => {
@@ -260,6 +261,10 @@ export function useAgentUi() {
   }, [updateSessionInputRequired, updateSessionStatus])
 
   useEffect(() => {
+    if (!enabled) {
+      wsRef.current?.close()
+      return
+    }
     let disposed = false
 
     async function connect() {
@@ -298,7 +303,7 @@ export function useAgentUi() {
       clearInterval(interval)
       wsRef.current?.close()
     }
-  }, [fetchDaemons, handleMessage])
+  }, [enabled, fetchDaemons, handleMessage])
 
   const send = useCallback((data: JsonObject) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

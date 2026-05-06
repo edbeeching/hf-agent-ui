@@ -7,10 +7,21 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from . import hf_jobs
-from .hf_jobs import HfJobsConfigError
-from .security import UI_TOKEN_COOKIE, UI_TOKEN_ENV, require_browser_http, should_expose_host_token
+from .hf_jobs import HfJobsConfigError, HfJobsPermissionError
+from .security import (
+    UI_TOKEN_COOKIE,
+    UI_TOKEN_ENV,
+    UserIdentity,
+    auth_mode,
+    current_browser_http_user,
+    require_browser_http,
+    require_browser_user,
+    should_expose_host_token,
+    user_host_token,
+)
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http)])
+public_router = APIRouter(prefix="/api")
 
 INSTALL_REPO_URL = "git+https://github.com/edbeeching/hf-agent-ui.git"
 INSTALL_COMMAND_PREFIX = "uv -vv tool install --force --reinstall"
@@ -19,6 +30,18 @@ INSTALL_COMMAND_PREFIX = "uv -vv tool install --force --reinstall"
 def _is_https_request(request: Request) -> bool:
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
     return forwarded_proto == "https" or request.url.scheme == "https"
+
+
+@public_router.get("/auth/me")
+async def auth_me(request: Request) -> dict[str, Any]:
+    user = current_browser_http_user(request)
+    return {
+        "authenticated": user is not None,
+        "user": user.to_dict() if user else None,
+        "authMode": auth_mode(),
+        "loginUrl": "/oauth/huggingface/login",
+        "logoutUrl": "/oauth/huggingface/logout",
+    }
 
 
 @router.post("/auth/browser-cookie")
@@ -40,15 +63,17 @@ async def set_browser_auth_cookie(request: Request, response: Response) -> dict[
 
 
 @router.get("/hub")
-async def hub_info(request: Request) -> dict[str, Any]:
+async def hub_info(request: Request, user: UserIdentity = Depends(require_browser_user)) -> dict[str, Any]:
     daemon_hub_url = daemon_hub_url_for_request(request)
     daemon_token = os.environ.get("HF_AGENT_UI_HOST_TOKEN")
+    if auth_mode() == "hf-oauth":
+        daemon_token = user_host_token(user)
     payload: dict[str, Any] = {
         "hostHubUrl": daemon_hub_url,
         "hostTokenRequired": bool(daemon_token),
         "installCommand": install_command_for_request(request),
     }
-    if daemon_token and should_expose_host_token():
+    if daemon_token and (auth_mode() == "hf-oauth" or should_expose_host_token()):
         payload["hostToken"] = daemon_token
     return payload
 
@@ -123,10 +148,16 @@ async def hf_cloud_hardware() -> list[dict[str, Any]]:
 
 
 @router.post("/cloud/hf/jobs")
-async def create_hf_cloud_job(req: HfCloudJobRequest, request: Request) -> dict[str, Any]:
+async def create_hf_cloud_job(
+    req: HfCloudJobRequest,
+    request: Request,
+    user: UserIdentity = Depends(require_browser_user),
+) -> dict[str, Any]:
     try:
         return hf_jobs.start_agent_host_job(
             hub_url=daemon_hub_url_for_request(request),
+            owner=user,
+            host_token=user_host_token(user) if auth_mode() == "hf-oauth" else os.environ.get("HF_AGENT_UI_HOST_TOKEN"),
             image=req.image,
             flavor=req.flavor,
             timeout=req.timeout,
@@ -139,9 +170,9 @@ async def create_hf_cloud_job(req: HfCloudJobRequest, request: Request) -> dict[
 
 
 @router.get("/cloud/hf/jobs")
-async def list_hf_cloud_jobs() -> list[dict[str, Any]]:
+async def list_hf_cloud_jobs(user: UserIdentity = Depends(require_browser_user)) -> list[dict[str, Any]]:
     try:
-        return hf_jobs.list_agent_host_jobs()
+        return hf_jobs.list_agent_host_jobs(owner=user)
     except HfJobsConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -149,9 +180,14 @@ async def list_hf_cloud_jobs() -> list[dict[str, Any]]:
 
 
 @router.post("/cloud/hf/jobs/{job_id}/cancel")
-async def cancel_hf_cloud_job(job_id: str) -> dict[str, Any]:
+async def cancel_hf_cloud_job(
+    job_id: str,
+    user: UserIdentity = Depends(require_browser_user),
+) -> dict[str, Any]:
     try:
-        return hf_jobs.cancel_agent_host_job(job_id)
+        return hf_jobs.cancel_agent_host_job(job_id, owner=user)
+    except HfJobsPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except HfJobsConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -182,10 +218,13 @@ async def heartbeat(daemon_id: str, request: Request) -> dict[str, str]:
 
 
 @router.get("/daemons")
-async def list_daemons(request: Request) -> list[dict[str, Any]]:
+async def list_daemons(
+    request: Request,
+    user: UserIdentity = Depends(require_browser_user),
+) -> list[dict[str, Any]]:
     registry = request.app.state.registry
     pool = request.app.state.pool
-    daemons = registry.list()
+    daemons = registry.list(owner_sub=user.sub)
     for d in daemons:
         d["connected"] = pool.is_connected(d["id"])
     return daemons

@@ -7,9 +7,9 @@ from typing import Any, Callable, Coroutine
 from fastapi import WebSocket, WebSocketDisconnect, status
 
 from .daemon_registry import DaemonInfo, DaemonRegistry
+from .security import UserIdentity, current_host_ws_user
 
 logger = logging.getLogger(__name__)
-HOST_TOKEN_HEADER = "x-hf-agent-ui-host-token"
 
 MessageCallback = Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]]
 
@@ -51,7 +51,8 @@ class DaemonConnectionPool:
         self._on_message = on_message
 
     async def handle_daemon(self, ws: WebSocket, expected_token: str | None = None) -> None:
-        if not _is_authorized(ws, expected_token):
+        owner = current_host_ws_user(ws, expected_token)
+        if owner is None:
             await ws.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
@@ -65,11 +66,11 @@ class DaemonConnectionPool:
             if not isinstance(register_payload, dict):
                 raise ValueError("daemon.register payload must be an object")
             name = self._daemon_name(register_payload)
-            duplicate = self._connected_daemon_by_name(name)
+            duplicate = self._connected_daemon_by_name(name, owner.sub)
             if duplicate:
                 await _send_error(ws, f"Agent host name already connected: {name}")
                 return
-            daemon = self._register(register_payload, name)
+            daemon = self._register(register_payload, name, owner)
             conn = DaemonConnection(daemon, ws, self._on_message)
             self._connections[daemon.id] = conn
             await conn.send({
@@ -98,14 +99,17 @@ class DaemonConnectionPool:
     def is_connected(self, daemon_id: str) -> bool:
         return daemon_id in self._connections
 
+    def owns(self, daemon_id: str, owner_sub: str) -> bool:
+        return self.registry.owns(daemon_id, owner_sub)
+
     async def disconnect_all(self) -> None:
         for conn in list(self._connections.values()):
             await conn.close()
         self._connections.clear()
 
-    def _connected_daemon_by_name(self, name: str) -> DaemonConnection | None:
+    def _connected_daemon_by_name(self, name: str, owner_sub: str) -> DaemonConnection | None:
         for conn in self._connections.values():
-            if conn.daemon.name == name:
+            if conn.daemon.name == name and conn.daemon.owner_sub == owner_sub:
                 return conn
         return None
 
@@ -118,23 +122,11 @@ class DaemonConnectionPool:
             raise ValueError("daemon.register requires a non-empty name")
         return name.strip()
 
-    def _register(self, msg: dict[str, Any], name: str) -> DaemonInfo:
+    def _register(self, msg: dict[str, Any], name: str, owner: UserIdentity) -> DaemonInfo:
         hostname = msg.get("hostname")
         if not isinstance(hostname, str):
             hostname = ""
-        return self.registry.register(name, "outbound", 0, hostname)
-
-
-def _is_authorized(ws: WebSocket, expected_token: str | None) -> bool:
-    if not expected_token:
-        return True
-    host_token = ws.headers.get(HOST_TOKEN_HEADER, "")
-    if host_token == expected_token:
-        return True
-    auth = ws.headers.get("authorization", "")
-    if auth == f"Bearer {expected_token}":
-        return True
-    return ws.query_params.get("token") == expected_token
+        return self.registry.register(name, "outbound", 0, hostname, owner=owner)
 
 
 async def _send_error(ws: WebSocket, message: str) -> None:

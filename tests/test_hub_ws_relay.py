@@ -1,6 +1,30 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from hf_agent_ui.hub.ws_relay import WsRelay
+
+
+class FakePool:
+    def __init__(self, owned: set[tuple[str, str]]) -> None:
+        self.owned = owned
+        self.sent: list[tuple[str, dict]] = []
+
+    def owns(self, daemon_id: str, owner_sub: str) -> bool:
+        return (daemon_id, owner_sub) in self.owned
+
+    async def send(self, daemon_id: str, data: dict) -> None:
+        self.sent.append((daemon_id, data))
+
+
+class FakeBrowser:
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    async def send_text(self, payload: str) -> None:
+        self.sent.append(json.loads(payload))
 
 
 def test_session_list_response_targets_requesting_browser_only() -> None:
@@ -41,3 +65,21 @@ def test_pty_events_target_subscribed_browser_only() -> None:
     assert started_targets == {browser_a}
     assert output_targets == {browser_a}
     assert browser_b not in output_targets
+
+
+@pytest.mark.asyncio
+async def test_browser_message_cannot_target_another_users_daemon() -> None:
+    pool = FakePool(owned={("daemon-1", "alice")})
+    relay = WsRelay(pool=pool)  # type: ignore[arg-type]
+    browser = FakeBrowser()
+    relay._clients.add(browser)  # type: ignore[arg-type]
+    relay._client_owners[browser] = "alice"  # type: ignore[index]
+
+    await relay._handle_browser_message(browser, {"type": "session.list", "daemonId": "daemon-2"})  # type: ignore[arg-type]
+
+    assert pool.sent == []
+    assert browser.sent == [{
+        "type": "error",
+        "message": "No connection to agent host daemon-2",
+        "requestType": "session.list",
+    }]

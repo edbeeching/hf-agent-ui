@@ -8,6 +8,7 @@ from typing import Any, Deque
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .daemon_connection import DaemonConnectionPool
+from .security import UserIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,15 @@ class WsRelay:
     def __init__(self, pool: DaemonConnectionPool) -> None:
         self.pool = pool
         self._clients: set[WebSocket] = set()
+        self._client_owners: dict[WebSocket, str] = {}
         self._session_subscribers: dict[tuple[str, str], set[WebSocket]] = defaultdict(set)
         self._pending_requests: dict[tuple[str, str], Deque[WebSocket]] = defaultdict(deque)
 
-    async def handle_browser(self, ws: WebSocket) -> None:
+    async def handle_browser(self, ws: WebSocket, user: UserIdentity) -> None:
         await ws.accept()
         self._clients.add(ws)
-        logger.info("Browser connected")
+        self._client_owners[ws] = user.sub
+        logger.info("Browser connected as %s", user.username)
         try:
             while True:
                 raw = await ws.receive_text()
@@ -60,6 +63,7 @@ class WsRelay:
             logger.info("Browser disconnected")
         finally:
             self._clients.discard(ws)
+            self._client_owners.pop(ws, None)
             self._remove_client(ws)
 
     async def _handle_browser_message(self, ws: WebSocket, req: dict[str, Any]) -> None:
@@ -69,6 +73,14 @@ class WsRelay:
             return
 
         daemon_id = str(daemon_id)
+        owner_sub = self._client_owners.get(ws)
+        if not owner_sub or not self.pool.owns(daemon_id, owner_sub):
+            await self._send_to_browser(ws, {
+                "type": "error",
+                "message": f"No connection to agent host {daemon_id}",
+                "requestType": req.get("type"),
+            })
+            return
         self._track_browser_request(ws, daemon_id, req)
         # Forward to daemon, stripping daemonId (daemon doesn't need it)
         daemon_msg = {k: v for k, v in req.items() if k != "daemonId"}

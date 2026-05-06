@@ -13,8 +13,24 @@ const MAX_RECENT_WORK_DIRS = 8
 const SHOW_CLOUD_HOSTS = false
 type MobileView = 'terminal' | 'sessions' | 'connect'
 
+interface AuthUser {
+  sub: string
+  username: string
+  displayName: string
+}
+
+interface AuthInfo {
+  authenticated: boolean
+  user: AuthUser | null
+  authMode: string
+  loginUrl: string
+  logoutUrl: string
+}
+
 function App() {
-  const sw = useAgentUi()
+  const [auth, setAuth] = useState<AuthInfo | null>(null)
+  const isAuthenticated = Boolean(auth?.authenticated)
+  const sw = useAgentUi(isAuthenticated)
   const {
     connected,
     daemons,
@@ -55,6 +71,32 @@ function App() {
   const newSessionDaemons = newSessionDaemonIds
     ? newSessionDaemonIds.map(id => daemons.find(daemon => daemon.id === id)).filter((daemon): daemon is Daemon => Boolean(daemon))
     : []
+
+  useEffect(() => {
+    let disposed = false
+    uiAuthFetch('/api/auth/me', { credentials: 'same-origin' })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Auth lookup failed: ${response.status}`)
+        return response.json() as Promise<AuthInfo>
+      })
+      .then(info => {
+        if (!disposed) setAuth(info)
+      })
+      .catch(() => {
+        if (!disposed) {
+          setAuth({
+            authenticated: false,
+            user: null,
+            authMode: 'single',
+            loginUrl: '/oauth/huggingface/login',
+            logoutUrl: '/oauth/huggingface/logout',
+          })
+        }
+      })
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!connected) return
@@ -103,11 +145,26 @@ function App() {
     }
   }, [inputRequiredItems])
 
+  if (!auth) {
+    return <AuthScreen loading />
+  }
+
+  if (!auth.authenticated) {
+    return <AuthScreen loginUrl={auth.loginUrl} authMode={auth.authMode} />
+  }
+
   return (
     <div className="app">
       <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
-          <h1>hf-agent-ui</h1>
+          <div>
+            <h1>hf-agent-ui</h1>
+            {auth.user && (
+              <a className="user-link" href={auth.logoutUrl} title="Sign out">
+                {auth.user.username}
+              </a>
+            )}
+          </div>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
             {connected ? 'Connected' : 'Disconnected'}
           </span>
@@ -226,6 +283,43 @@ function App() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AuthScreen({
+  loading = false,
+  loginUrl = '/oauth/huggingface/login',
+  authMode = 'hf-oauth',
+}: {
+  loading?: boolean
+  loginUrl?: string
+  authMode?: string
+}) {
+  return (
+    <div className="auth-screen">
+      <div className="auth-panel">
+        <h1>hf-agent-ui</h1>
+        <p>{loading ? 'Checking authentication...' : 'Sign in to connect your own agent hosts.'}</p>
+        {!loading && (
+          <div className="auth-actions">
+            {authMode === 'hf-oauth' ? (
+              <>
+                <a className="auth-primary" href={loginUrl} target="_blank" rel="noreferrer">
+                  Sign in with Hugging Face
+                </a>
+                <button type="button" onClick={() => window.location.reload()}>
+                  Refresh
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={() => window.location.reload()}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
