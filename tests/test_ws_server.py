@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 import websockets
 
-from switch.daemon.pty_session import TOOL_COMMANDS
-from switch.daemon.session_manager import SessionManager
-from switch.daemon.ws_server import DaemonWsServer
+from hf_agent_ui.daemon.pty_session import TOOL_COMMANDS
+from hf_agent_ui.daemon.session_manager import SessionManager
+from hf_agent_ui.daemon.ws_server import DaemonWsServer
 
 MOCK_CLI = str(Path(__file__).parent / "mock_cli.py")
 
@@ -338,7 +338,7 @@ async def test_subscribe_replays_buffered_pty_output(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_pause_and_resume_session_via_ws(tmp_path: Path) -> None:
-    """Paused PTY sessions should keep their Switch id and resume into a running process."""
+    """Paused PTY sessions should keep their HF Agent UI id and resume into a running process."""
     manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()

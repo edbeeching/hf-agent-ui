@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from switch.daemon.pty_session import TOOL_COMMANDS, PtySession
+from hf_agent_ui.daemon.pty_session import TOOL_COMMANDS, PtySession
 
 
 MOCK_CLI = str(Path(__file__).parent / "mock_cli.py")

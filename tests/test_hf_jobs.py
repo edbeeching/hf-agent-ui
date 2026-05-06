@@ -6,8 +6,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from switch.hub import hf_jobs
-from switch.hub.app import app
+from hf_agent_ui.hub import hf_jobs
+from hf_agent_ui.hub.app import app
 
 
 @dataclass
@@ -49,21 +49,21 @@ class FakeHardware:
 
 def test_hf_jobs_config_reports_missing_env(monkeypatch) -> None:
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
 
     payload = hf_jobs.config_payload()
 
     assert payload["enabled"] is False
-    assert payload["missingConfig"] == ["HF_TOKEN", "SWITCH_DAEMON_TOKEN"]
+    assert payload["missingConfig"] == ["HF_TOKEN", "HF_AGENT_UI_HOST_TOKEN"]
     assert payload["defaults"]["image"] == "python:3.12"
     assert payload["defaults"]["flavor"] == "cpu-basic"
-    assert payload["defaults"]["spaceRepoId"] == "edbeeching/agentic-ui"
+    assert payload["defaults"]["spaceRepoId"] == "edbeeching/hf-agent-ui"
 
 
 def test_hf_jobs_start_injects_secrets_and_bootstrap_command(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-secret")
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "daemon-secret")
-    monkeypatch.setenv("SWITCH_HF_SPACE_REPO_ID", "edbeeching/agentic-ui")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "daemon-secret")
+    monkeypatch.setenv("HF_AGENT_UI_SPACE_REPO_ID", "edbeeching/hf-agent-ui")
     calls: list[dict[str, Any]] = []
 
     def fake_run_job(**kwargs):
@@ -77,7 +77,7 @@ def test_hf_jobs_start_injects_secrets_and_bootstrap_command(monkeypatch) -> Non
     monkeypatch.setattr(hf_jobs, "run_job", fake_run_job)
 
     payload = hf_jobs.start_agent_host_job(
-        hub_url="https://edbeeching-agentic-ui.hf.space",
+        hub_url="https://edbeeching-hf-agent-ui.hf.space",
         image="python:3.12",
         flavor="t4-small",
         timeout="30m",
@@ -94,24 +94,24 @@ def test_hf_jobs_start_injects_secrets_and_bootstrap_command(monkeypatch) -> Non
     assert call["flavor"] == "t4-small"
     assert call["timeout"] == "30m"
     assert call["env"] == {
-        "SWITCH_HUB_URL": "https://edbeeching-agentic-ui.hf.space",
-        "SWITCH_HF_SPACE_REPO_ID": "edbeeching/agentic-ui",
-        "SWITCH_DAEMON_NAME": "gpu-box",
+        "HF_AGENT_UI_HUB_URL": "https://edbeeching-hf-agent-ui.hf.space",
+        "HF_AGENT_UI_SPACE_REPO_ID": "edbeeching/hf-agent-ui",
+        "HF_AGENT_UI_HOST_NAME": "gpu-box",
     }
     assert call["secrets"] == {
         "HF_TOKEN": "hf-secret",
-        "SWITCH_DAEMON_TOKEN": "daemon-secret",
+        "HF_AGENT_UI_HOST_TOKEN": "daemon-secret",
     }
-    assert call["labels"]["app"] == "agentic-ui"
+    assert call["labels"]["app"] == "hf-agent-ui"
     assert call["labels"]["purpose"] == "agent-host"
-    assert "'switch', 'host'" in call["command"][2]
+    assert "'hf-agent-ui', 'host'" in call["command"][2]
     assert "daemon-secret" not in str(payload)
     assert "hf-secret" not in str(payload)
 
 
 def test_hf_jobs_start_generates_name_when_omitted(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-secret")
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "daemon-secret")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "daemon-secret")
     monkeypatch.setattr(hf_jobs, "_generated_name", lambda: "hf-container-1234abcd")
     calls: list[dict[str, Any]] = []
 
@@ -125,14 +125,14 @@ def test_hf_jobs_start_generates_name_when_omitted(monkeypatch) -> None:
 
     monkeypatch.setattr(hf_jobs, "run_job", fake_run_job)
 
-    payload = hf_jobs.start_agent_host_job(hub_url="https://edbeeching-agentic-ui.hf.space")
+    payload = hf_jobs.start_agent_host_job(hub_url="https://edbeeching-hf-agent-ui.hf.space")
 
     assert payload["daemonName"] == "hf-container-1234abcd"
-    assert calls[0]["env"]["SWITCH_DAEMON_NAME"] == "hf-container-1234abcd"
+    assert calls[0]["env"]["HF_AGENT_UI_HOST_NAME"] == "hf-container-1234abcd"
     assert calls[0]["labels"]["daemon_name"] == "hf-container-1234abcd"
 
 
-def test_hf_jobs_list_filters_agentic_ui_jobs(monkeypatch) -> None:
+def test_hf_jobs_list_filters_hf_agent_ui_jobs(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-secret")
 
     monkeypatch.setattr(hf_jobs, "list_jobs", lambda **kwargs: [
@@ -189,8 +189,8 @@ def test_hf_jobs_cancel_calls_client(monkeypatch) -> None:
 
 def test_hf_jobs_routes_do_not_expose_secrets(monkeypatch) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf-secret")
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "daemon-secret")
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "daemon-secret")
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
     monkeypatch.setattr(hf_jobs, "_generated_name", lambda: "hf-container-1234abcd")
 
     def fake_run_job(**kwargs):
@@ -202,7 +202,7 @@ def test_hf_jobs_routes_do_not_expose_secrets(monkeypatch) -> None:
 
     monkeypatch.setattr(hf_jobs, "run_job", fake_run_job)
 
-    with TestClient(app, base_url="https://edbeeching-agentic-ui.hf.space") as client:
+    with TestClient(app, base_url="https://edbeeching-hf-agent-ui.hf.space") as client:
         response = client.post("/api/cloud/hf/jobs", json={})
 
     assert response.status_code == 200
@@ -215,8 +215,8 @@ def test_hf_jobs_routes_do_not_expose_secrets(monkeypatch) -> None:
 
 def test_hf_jobs_config_route_works_without_config(monkeypatch) -> None:
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_DAEMON_TOKEN", raising=False)
-    monkeypatch.setenv("SWITCH_TRUST_PROXY_AUTH", "1")
+    monkeypatch.delenv("HF_AGENT_UI_HOST_TOKEN", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_TRUST_PROXY_AUTH", "1")
 
     with TestClient(app) as client:
         response = client.get("/api/cloud/hf/config")

@@ -1,4 +1,4 @@
-# agentic-ui — User Stories
+# hf-agent-ui — User Stories
 
 ## 1. Solo developer, single machine
 
@@ -6,11 +6,11 @@
 
 ```bash
 # Install
-uv tool install git+ssh://git@github.com/edbeeching/agentic-ui.git
+uv tool install git+https://github.com/edbeeching/hf-agent-ui.git
 
 # Start everything
-switch hub &
-switch host &
+hf-agent-ui hub &
+hf-agent-ui host &
 
 # Open http://localhost:9341
 # Click "+" next to the environment → select "Claude Code" → set working dir → Create
@@ -41,17 +41,17 @@ Click any session to see its conversation. Move between them instantly. Each ses
 
 ```bash
 # On your laptop — start the hub
-switch hub
+hf-agent-ui hub
 
 # On the remote server — install and connect back
-uv tool install git+ssh://git@github.com/edbeeching/agentic-ui.git
-switch host --hub http://your-laptop:9341 --name gpu-server
+uv tool install git+https://github.com/edbeeching/hf-agent-ui.git
+hf-agent-ui host --hub http://your-laptop:9341 --name gpu-server
 ```
 
 ```
 Sidebar:
   local (laptop)
-    ● [claude] ~/work/agentic-ui
+    ● [claude] ~/work/hf-agent-ui
   gpu-server (ml-box)
     ● [claude] ~/experiments/train    ← running on the remote machine
 ```
@@ -66,12 +66,12 @@ Both agent hosts appear in the same dashboard. You create sessions on either mac
 
 ```bash
 # On host — start the hub
-switch hub
+hf-agent-ui hub
 
 # Inside the container
 pip install uv  # or however you get uv in there
-uv tool install git+ssh://git@github.com/edbeeching/agentic-ui.git
-switch host --hub http://host.docker.internal:9341 --name my-container
+uv tool install git+https://github.com/edbeeching/hf-agent-ui.git
+hf-agent-ui host --hub http://host.docker.internal:9341 --name my-container
 ```
 
 The container's agent host registers with your host's hub. You create sessions that run inside the container's filesystem.
@@ -95,19 +95,19 @@ Create two sessions on the same working directory — one Claude Code, one Codex
 
 ## 6. Dev workflow with hot reload
 
-**Scenario:** You're actively developing agentic-ui itself and want instant feedback.
+**Scenario:** You're actively developing hf-agent-ui itself and want instant feedback.
 
 ```bash
 # One command starts everything with hot reload
-switch dev
+hf-agent-ui dev
 
 # Or manually:
-switch hub --dev    # Python auto-reload via uvicorn
-cd switch/web && npm run dev   # Frontend hot reload via Vite
-switch host
+hf-agent-ui hub --dev    # Python auto-reload via uvicorn
+cd hf_agent_ui/web && npm run dev   # Frontend hot reload via Vite
+hf-agent-ui host
 
 # Or run the hub with a local agent host attached:
-switch hub --local-agent-host
+hf-agent-ui hub --local-agent-host
 ```
 
 - Edit Python files → hub auto-restarts
@@ -122,11 +122,11 @@ switch hub --local-agent-host
 
 ```bash
 # Ops: deploy the hub on a shared server
-switch hub --host 0.0.0.0 --port 9341
+hf-agent-ui hub --host 0.0.0.0 --port 9341
 
 # Each developer:
-switch host --hub http://hub.internal:9341 --name alice-laptop
-switch host --hub http://hub.internal:9341 --name bob-workstation
+hf-agent-ui host --hub http://hub.internal:9341 --name alice-laptop
+hf-agent-ui host --hub http://hub.internal:9341 --name bob-workstation
 ```
 
 ```
@@ -138,16 +138,16 @@ Sidebar:
     ● [codex]  ~/code/backend
 ```
 
-Everyone sees all sessions. (Auth not yet implemented — single-user trust model for now.)
+Everyone sees all sessions. Use `HF_AGENT_UI_BROWSER_TOKEN` or a trusted private access layer before exposing a shared hub.
 
 ---
 
 ## 8. Self-updating
 
-**Scenario:** A new version of agentic-ui is pushed to the repo.
+**Scenario:** A new version of hf-agent-ui is pushed to the repo.
 
 ```bash
-switch update
+hf-agent-ui update
 # → pulls latest from GitHub, reinstalls the tool
 # Restart hub/agent host to pick up changes
 ```

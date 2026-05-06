@@ -6,13 +6,13 @@ import subprocess
 import sys
 import threading
 
-from switch import cli
+from hf_agent_ui import cli
 
 
 def test_host_command_dispatches_to_agent_host_runner(monkeypatch) -> None:
     calls = []
 
-    monkeypatch.setattr(sys, "argv", ["switch", "host", "--hub", "http://hub.example.test", "--name", "devbox"])
+    monkeypatch.setattr(sys, "argv", ["hf-agent-ui", "host", "--hub", "http://hub.example.test", "--name", "devbox"])
     monkeypatch.setattr(cli, "_run_daemon", lambda args: calls.append(args))
 
     cli.main()
@@ -22,22 +22,10 @@ def test_host_command_dispatches_to_agent_host_runner(monkeypatch) -> None:
     assert calls[0].name == "devbox"
 
 
-def test_daemon_command_remains_backward_compatible(monkeypatch) -> None:
-    calls = []
-
-    monkeypatch.setattr(sys, "argv", ["switch", "daemon", "--hub", "http://hub.example.test"])
-    monkeypatch.setattr(cli, "_run_daemon", lambda args: calls.append(args))
-
-    cli.main()
-
-    assert len(calls) == 1
-    assert calls[0].hub == "http://hub.example.test"
-
-
 def test_hub_command_defaults_to_loopback(monkeypatch) -> None:
     calls = []
 
-    monkeypatch.setattr(sys, "argv", ["switch", "hub"])
+    monkeypatch.setattr(sys, "argv", ["hf-agent-ui", "hub"])
     monkeypatch.setattr(cli, "_run_hub", lambda args: calls.append(args))
 
     cli.main()
@@ -81,7 +69,7 @@ def test_run_hub_does_not_kill_port(monkeypatch) -> None:
             pass
 
     def fail_kill_port(port: int) -> None:
-        raise AssertionError(f"_kill_port should not be called for switch hub: {port}")
+        raise AssertionError(f"_kill_port should not be called for hf-agent-ui hub: {port}")
 
     monkeypatch.setattr(cli, "_kill_port", fail_kill_port)
     monkeypatch.setattr(threading, "Timer", FakeTimer)
@@ -166,7 +154,7 @@ def test_run_hub_can_launch_local_daemon(monkeypatch) -> None:
 
     assert popen_calls
     cmd, kwargs = popen_calls[0]
-    assert cmd[:3] == [cli.sys.executable, "-m", "switch.daemon"]
+    assert cmd[:3] == [cli.sys.executable, "-m", "hf_agent_ui.daemon"]
     assert "--port" in cmd
     assert "9440" in cmd
     assert "--hub" in cmd
@@ -216,7 +204,7 @@ def test_run_hub_ready_check_uses_ui_token(monkeypatch) -> None:
     import os
     import uvicorn
 
-    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.setenv("HF_AGENT_UI_BROWSER_TOKEN", "ui-secret")
     monkeypatch.setattr(threading, "Timer", FakeTimer)
     monkeypatch.setattr(threading, "Thread", FakeThread)
     monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: get_calls.append((args, kwargs)) or object())
@@ -237,12 +225,12 @@ def test_run_hub_ready_check_uses_ui_token(monkeypatch) -> None:
     ))
 
     assert get_calls
-    assert get_calls[0][1]["headers"] == {"X-Agentic-UI-Token": "ui-secret"}
+    assert get_calls[0][1]["headers"] == {"X-HF-Agent-UI-Token": "ui-secret"}
 
 
 def test_run_hub_refuses_public_bind_without_auth(monkeypatch, capsys) -> None:
-    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     try:
         cli._run_hub(argparse.Namespace(
@@ -274,7 +262,7 @@ def test_run_hub_allows_public_bind_with_ui_token(monkeypatch) -> None:
     import uvicorn
 
     calls = []
-    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
+    monkeypatch.setenv("HF_AGENT_UI_BROWSER_TOKEN", "ui-secret")
     monkeypatch.setattr(threading, "Timer", FakeTimer)
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
 
@@ -311,14 +299,14 @@ def test_run_daemon_does_not_kill_port_by_default(monkeypatch) -> None:
 
 
 def test_daemon_token_defaults_to_env(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "from-env")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "from-env")
 
     assert cli._daemon_token(argparse.Namespace(token=None)) == "from-env"
     assert cli._daemon_token(argparse.Namespace()) == "from-env"
 
 
 def test_daemon_token_uses_explicit_value(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "from-env")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "from-env")
 
     assert cli._daemon_token(argparse.Namespace(token="explicit")) == "explicit"
 
@@ -347,7 +335,7 @@ def test_hf_token_uses_explicit_value(monkeypatch) -> None:
 
 
 def test_missing_hf_token_message_explains_private_space_failure() -> None:
-    message = cli._missing_hf_token_message("https://edbeeching-agentic-ui.hf.space", None)
+    message = cli._missing_hf_token_message("https://edbeeching-hf-agent-ui.hf.space", None)
 
     assert message is not None
     assert "--hf-token" in message
@@ -360,7 +348,7 @@ def test_missing_hf_token_message_is_skipped_for_non_hf_hub() -> None:
 
 
 def test_missing_hf_token_message_is_skipped_when_token_present() -> None:
-    assert cli._missing_hf_token_message("https://edbeeching-agentic-ui.hf.space", "hf-token") is None
+    assert cli._missing_hf_token_message("https://edbeeching-hf-agent-ui.hf.space", "hf-token") is None
 
 
 def test_daemon_name_defaults_to_hostname(monkeypatch) -> None:

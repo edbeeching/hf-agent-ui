@@ -4,11 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from switch.hub.app import app
+from hf_agent_ui.hub.app import app
 
 
 def test_daemon_ws_requires_configured_token(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
 
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect):
@@ -17,7 +17,7 @@ def test_daemon_ws_requires_configured_token(monkeypatch) -> None:
 
 
 def test_daemon_ws_registers_and_relays_browser_messages(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
 
     with TestClient(app) as client:
         with client.websocket_connect("/daemon/ws", headers={"Authorization": "Bearer secret"}) as daemon_ws:
@@ -54,7 +54,7 @@ def test_daemon_ws_registers_and_relays_browser_messages(monkeypatch) -> None:
 
 
 def test_daemon_ws_allows_query_token(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
 
     with TestClient(app) as client:
         with client.websocket_connect("/daemon/ws?token=secret") as daemon_ws:
@@ -67,10 +67,10 @@ def test_daemon_ws_allows_query_token(monkeypatch) -> None:
 
 
 def test_daemon_ws_allows_host_token_header(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
 
     with TestClient(app) as client:
-        with client.websocket_connect("/daemon/ws", headers={"X-Agentic-UI-Host-Token": "secret"}) as daemon_ws:
+        with client.websocket_connect("/daemon/ws", headers={"X-HF-Agent-UI-Host-Token": "secret"}) as daemon_ws:
             daemon_ws.send_json({
                 "type": "daemon.register",
                 "name": "remote",
@@ -80,8 +80,8 @@ def test_daemon_ws_allows_host_token_header(monkeypatch) -> None:
 
 
 def test_browser_ws_requires_ui_token_for_remote_browser(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_BROWSER_TOKEN", "ui-secret")
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(app, base_url="http://hub.example.test:9341") as client:
         with pytest.raises(WebSocketDisconnect):
@@ -90,8 +90,8 @@ def test_browser_ws_requires_ui_token_for_remote_browser(monkeypatch) -> None:
 
 
 def test_browser_ws_allows_ui_token_query_for_remote_browser(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_BROWSER_TOKEN", "ui-secret")
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(app, base_url="http://hub.example.test:9341") as client:
         with client.websocket_connect("/ws?uiToken=ui-secret"):
@@ -99,8 +99,8 @@ def test_browser_ws_allows_ui_token_query_for_remote_browser(monkeypatch) -> Non
 
 
 def test_browser_ws_allows_ui_token_cookie_for_remote_browser(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_UI_TOKEN", "ui-secret")
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.setenv("HF_AGENT_UI_BROWSER_TOKEN", "ui-secret")
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(
         app,
@@ -109,17 +109,17 @@ def test_browser_ws_allows_ui_token_cookie_for_remote_browser(monkeypatch) -> No
     ) as client:
         response = client.post(
             "/api/auth/browser-cookie",
-            headers={"X-Agentic-UI-Token": "ui-secret"},
+            headers={"X-HF-Agent-UI-Token": "ui-secret"},
         )
         assert response.status_code == 200
 
-        with client.websocket_connect("/ws", headers={"Cookie": "agentic_ui_token=ui-secret"}):
+        with client.websocket_connect("/ws", headers={"Cookie": "hf_agent_ui_token=ui-secret"}):
             pass
 
 
 def test_browser_ws_rejects_spoofed_local_host_from_remote_client(monkeypatch) -> None:
-    monkeypatch.delenv("SWITCH_UI_TOKEN", raising=False)
-    monkeypatch.delenv("SWITCH_TRUST_PROXY_AUTH", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_BROWSER_TOKEN", raising=False)
+    monkeypatch.delenv("HF_AGENT_UI_TRUST_PROXY_AUTH", raising=False)
 
     with TestClient(
         app,
@@ -132,7 +132,7 @@ def test_browser_ws_rejects_spoofed_local_host_from_remote_client(monkeypatch) -
 
 
 def test_daemon_ws_rejects_duplicate_active_name(monkeypatch) -> None:
-    monkeypatch.setenv("SWITCH_DAEMON_TOKEN", "secret")
+    monkeypatch.setenv("HF_AGENT_UI_HOST_TOKEN", "secret")
 
     with TestClient(app) as client:
         with client.websocket_connect("/daemon/ws?token=secret") as first_ws:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from switch.daemon.session_manager import SessionManager
+from hf_agent_ui.daemon.session_manager import SessionManager
 
 
 def test_session_manager_restores_dead_running_pty_as_paused(tmp_path: Path) -> None:
