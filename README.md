@@ -136,8 +136,6 @@ Development: https://edbeeching-hf-agent-ui-dev.hf.space
 Production:  https://edbeeching-hf-agent-ui.hf.space
 ```
 
-The older `edbeeching-agentic-ui*.hf.space` URLs were renamed and should not be used for new host connections.
-
 ### Cloud Agent Hosts
 
 The Space UI can launch an agent host as a Hugging Face Job. The Space-side `HF_TOKEN` and `HF_AGENT_UI_HOST_TOKEN` secrets are passed server-side to the job; they are not returned to the browser.

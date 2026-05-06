@@ -51,6 +51,10 @@ export function TerminalView({
       cursorBlink: true,
       fontSize: terminalFontSize(),
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace",
+      linkHandler: {
+        allowNonHttpProtocols: false,
+        activate: (_event, uri) => openTerminalLink(uri),
+      },
       theme: {
         background: '#0d1117',
         foreground: '#e6edf3',
@@ -76,7 +80,7 @@ export function TerminalView({
     })
 
     const fitAddon = new FitAddon()
-    const webLinksAddon = new WebLinksAddon()
+    const webLinksAddon = new WebLinksAddon((_event, uri) => openTerminalLink(uri))
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
     term.open(containerRef.current)
@@ -157,6 +161,33 @@ export function TerminalView({
 
 function terminalFontSize(): number {
   return window.matchMedia('(max-width: 760px)').matches ? 12 : 13
+}
+
+function openTerminalLink(uri: string): void {
+  const url = safeTerminalLink(uri)
+  if (!url) return
+
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.target = '_blank'
+  anchor.rel = 'noopener noreferrer'
+  anchor.referrerPolicy = 'no-referrer'
+  anchor.style.display = 'none'
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+function safeTerminalLink(uri: string): string | null {
+  try {
+    const url = new URL(uri)
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return url.toString()
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 function toolLabel(tool?: string): string {
