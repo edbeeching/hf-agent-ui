@@ -30,11 +30,13 @@ logger = logging.getLogger(__name__)
 EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 MAX_OUTPUT_BUFFER_BYTES = 1_000_000
-PAUSE_EXIT_COMMAND = "/exit\r"
+TUI_PAUSE_EXIT_COMMAND = "/exit\r"
+BASH_PAUSE_EXIT_COMMAND = "exit\r"
 PAUSE_EXIT_GRACE_SECONDS = 5.0
 CUSTOM_LAUNCH_SHELL_ENV = "SWITCH_CUSTOM_LAUNCH_SHELL"
 
 TOOL_COMMANDS: dict[str, list[str]] = {
+    "bash": ["bash"],
     "claude": ["claude"],
     "codex": ["codex"],
 }
@@ -322,10 +324,15 @@ class PtySession:
         if self._master_fd is None:
             return False
         try:
-            os.write(self._master_fd, PAUSE_EXIT_COMMAND.encode("utf-8"))
+            os.write(self._master_fd, self._pause_exit_command().encode("utf-8"))
             return True
         except OSError:
             return False
+
+    def _pause_exit_command(self) -> str:
+        if self.tool == "bash":
+            return BASH_PAUSE_EXIT_COMMAND
+        return TUI_PAUSE_EXIT_COMMAND
 
     def _terminate_process(self) -> None:
         if self._proc and self._proc.poll() is None:

@@ -187,9 +187,10 @@ function ProjectSection({
             })
           }}
           title={session.needs_input ? session.needs_input_reason || 'Human input required' : daemon.name}
+          aria-label={session.needs_input ? `${session.tool} session needs input` : `${session.tool} session`}
         >
-          <span className={`status-dot ${session.status}`} />
-          {session.needs_input && <span className="input-required-badge">!</span>}
+          <span className={`status-dot ${session.needs_input ? 'input-required' : session.status}`} />
+          {session.needs_input && <span className="input-required-badge">Input</span>}
           <span className={`tool-badge ${session.tool || 'claude'}`}>{session.tool || 'claude'}</span>
           {session.launch_mode === 'custom' && (
             <span className="launch-badge" title={session.launch_command || 'Custom launch'}>

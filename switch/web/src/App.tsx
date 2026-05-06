@@ -35,6 +35,12 @@ function App() {
     && (sessions.get(selected.daemonId) || []).some(session => session.id === selected.sessionId)
     ? selected
     : null
+  const activeSession = activeSelected
+    ? (sessions.get(activeSelected.daemonId) || []).find(session => session.id === activeSelected.sessionId) || null
+    : null
+  const inputRequiredCount = [...sessions.values()]
+    .flat()
+    .filter(session => session.needs_input).length
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
   const newSessionDaemons = newSessionDaemonIds
@@ -58,6 +64,13 @@ function App() {
       window.localStorage.removeItem(SELECTED_SESSION_STORAGE_KEY)
     }
   }, [activeSelected, connected, subscribeSession])
+
+  useEffect(() => {
+    document.title = inputRequiredCount > 0 ? `(${inputRequiredCount}) agentic-ui` : 'agentic-ui'
+    return () => {
+      document.title = 'agentic-ui'
+    }
+  }, [inputRequiredCount])
 
   return (
     <div className="app">
@@ -94,6 +107,9 @@ function App() {
           sessionId={activeSelected?.sessionId || ''}
           output={selectedPtyOutput}
           visible={activeMobileView === 'terminal'}
+          needsInput={Boolean(activeSession?.needs_input)}
+          inputReason={activeSession?.needs_input_reason || null}
+          tool={activeSession?.tool}
           onInput={data => {
             if (activeSelected) sendPtyInput(activeSelected.daemonId, activeSelected.sessionId, data)
           }}
@@ -122,7 +138,7 @@ function App() {
           aria-current={activeMobileView === 'sessions' ? 'page' : undefined}
           onClick={() => setActiveMobileView('sessions')}
         >
-          Sessions
+          {inputRequiredCount > 0 ? `Sessions (${inputRequiredCount})` : 'Sessions'}
         </button>
         <button
           type="button"

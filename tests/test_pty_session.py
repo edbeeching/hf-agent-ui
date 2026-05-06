@@ -83,6 +83,15 @@ def test_custom_launch_resume_uses_same_template(tmp_path: Path) -> None:
     assert args[2] == "launcher claude --resume claude-session"
 
 
+def test_bash_tool_builds_plain_shell_command(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path), tool="bash")
+
+    assert TOOL_COMMANDS["bash"] == ["bash"]
+    assert session._build_tool_args(["bash"], resume=False) == ["bash"]
+    assert session._build_tool_args(["bash"], resume=True) == ["bash"]
+    assert session._pause_exit_command() == "exit\r"
+
+
 def test_terminate_process_targets_process_group(monkeypatch, tmp_path: Path) -> None:
     class FakeProc:
         pid = 123
