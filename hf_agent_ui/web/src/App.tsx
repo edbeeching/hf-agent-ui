@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAgentUi } from './hooks/useAgentUi'
-import type { Daemon, SessionInfo } from './hooks/useAgentUi'
+import type { Daemon } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -62,15 +62,6 @@ function App() {
   const inputRequiredCount = [...sessions.values()]
     .flat()
     .filter(session => session.needs_input).length
-  const inputRequiredItems = useMemo(
-    () => inputRequiredSessions(daemons, sessions),
-    [daemons, sessions],
-  )
-  const [inputToast, setInputToast] = useState<InputToast | null>(null)
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => (
-    browserNotificationsSupported() ? window.Notification.permission : 'denied'
-  ))
-  const notifiedInputEvents = useRef<Set<string>>(new Set())
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
   const newSessionDaemons = newSessionDaemonIds
@@ -134,28 +125,6 @@ function App() {
       document.title = 'hf-agent-ui'
     }
   }, [inputRequiredCount])
-
-  useEffect(() => {
-    const activeKeys = new Set(inputRequiredItems.map(inputEventKey))
-    for (const key of notifiedInputEvents.current) {
-      if (!activeKeys.has(key)) notifiedInputEvents.current.delete(key)
-    }
-
-    const item = inputRequiredItems.find(candidate => !notifiedInputEvents.current.has(inputEventKey(candidate)))
-    if (!item) return
-
-    const key = inputEventKey(item)
-    notifiedInputEvents.current.add(key)
-    const toast = inputToastFromItem(item)
-    setInputToast(toast)
-
-    if (browserNotificationsSupported() && window.Notification.permission === 'granted') {
-      new window.Notification(toast.title, {
-        body: toast.message,
-        tag: key,
-      })
-    }
-  }, [inputRequiredItems])
 
   if (!auth) {
     return <AuthScreen loading />
@@ -266,37 +235,6 @@ function App() {
         />
       )}
 
-      {inputToast && (
-        <div className={`input-alert-toast ${inputToast.kind || 'prompt'}`} role="status">
-          <button
-            type="button"
-            className="input-alert-main"
-            onClick={() => {
-              setSelected({ daemonId: inputToast.daemonId, sessionId: inputToast.sessionId })
-              setActiveMobileView('terminal')
-              setInputToast(null)
-            }}
-          >
-            <span className="input-alert-kicker">{inputKindLabel(inputToast.kind)}</span>
-            <span className="input-alert-title">{inputToast.title}</span>
-            <span className="input-alert-message">{inputToast.message}</span>
-          </button>
-          <div className="input-alert-actions">
-            {browserNotificationsSupported() && notificationPermission === 'default' && (
-              <button
-                type="button"
-                onClick={() => {
-                  void window.Notification.requestPermission()
-                    .then(permission => setNotificationPermission(permission))
-                }}
-              >
-                Enable alerts
-              </button>
-            )}
-            <button type="button" onClick={() => setInputToast(null)}>Dismiss</button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -845,85 +783,4 @@ function persistRecentWorkDirs(state: RecentWorkDirsState): RecentWorkDirsState 
 
 function recentWorkDirsHostKey(daemon: Daemon): string {
   return daemon.name.trim() || daemon.hostname.trim() || daemon.id
-}
-
-interface InputRequiredItem {
-  daemon: Daemon
-  daemonId: string
-  session: SessionInfo
-}
-
-interface InputToast {
-  daemonId: string
-  sessionId: string
-  kind: SessionInfo['needs_input_kind']
-  title: string
-  message: string
-}
-
-function inputRequiredSessions(daemons: Daemon[], sessions: Map<string, SessionInfo[]>): InputRequiredItem[] {
-  const daemonById = new Map(daemons.map(daemon => [daemon.id, daemon]))
-  return [...sessions.entries()]
-    .flatMap(([daemonId, list]) => {
-      const daemon = daemonById.get(daemonId)
-      if (!daemon) return []
-      return list
-        .filter(session => session.needs_input)
-        .map(session => ({ daemon, daemonId, session }))
-    })
-    .sort((left, right) => inputTimestamp(right.session) - inputTimestamp(left.session))
-}
-
-function inputEventKey(item: InputRequiredItem): string {
-  return [
-    item.daemonId,
-    item.session.id,
-    item.session.needs_input_detected_at || 'unknown',
-    item.session.needs_input_reason || '',
-  ].join(':')
-}
-
-function inputToastFromItem(item: InputRequiredItem): InputToast {
-  const session = item.session
-  const tool = toolLabel(session.tool)
-  const title = session.needs_input_title || `${tool} needs input`
-  const message = session.needs_input_message
-    || session.needs_input_reason
-    || `${tool} is waiting in ${projectNameFromPath(session.work_dir)} on ${item.daemon.name}`
-  return {
-    daemonId: item.daemonId,
-    sessionId: session.id,
-    kind: session.needs_input_kind,
-    title,
-    message,
-  }
-}
-
-function inputTimestamp(session: SessionInfo): number {
-  const value = session.needs_input_detected_at ? Date.parse(session.needs_input_detected_at) : 0
-  return Number.isFinite(value) ? value : 0
-}
-
-function browserNotificationsSupported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window
-}
-
-function inputKindLabel(kind: SessionInfo['needs_input_kind']): string {
-  if (kind === 'permission') return 'Permission'
-  if (kind === 'confirmation') return 'Confirm'
-  if (kind === 'auth') return 'Auth'
-  return 'Input'
-}
-
-function toolLabel(tool?: string): string {
-  if (tool === 'codex') return 'Codex'
-  if (tool === 'bash') return 'Bash'
-  return 'Claude'
-}
-
-function projectNameFromPath(path: string): string {
-  const clean = path.trim().replace(/[\\/]+$/, '')
-  if (!clean || clean === '~') return 'Home'
-  const parts = clean.split(/[\\/]+/)
-  return parts[parts.length - 1] || clean
 }
