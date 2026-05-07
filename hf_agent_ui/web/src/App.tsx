@@ -257,7 +257,7 @@ function AuthScreen({
           <div className="auth-actions">
             {authMode === 'hf-oauth' ? (
               <>
-                <a className="auth-primary" href={loginUrl} target="_blank" rel="noreferrer">
+                <a className="auth-primary" href={loginUrl}>
                   Sign in with Hugging Face
                 </a>
                 <button type="button" onClick={() => window.location.reload()}>
