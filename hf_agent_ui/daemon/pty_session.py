@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,13 @@ class PtySession:
         await self._finish_pending_pause()
         await self._spawn(resume=True)
 
-    async def _spawn(self, *, resume: bool) -> None:
+    async def _spawn(
+        self,
+        *,
+        resume: bool,
+        prompt: str | None = None,
+        image_paths: Sequence[str | Path] | None = None,
+    ) -> None:
         cmd = TOOL_COMMANDS.get(self.tool)
         if not cmd:
             raise ValueError(f"Unknown tool: {self.tool}. Available: {list(TOOL_COMMANDS.keys())}")
@@ -158,7 +164,7 @@ class PtySession:
             hook_file = self._prepare_claude_notification_hook(env)
         elif self.tool == "codex":
             hook_file = self._prepare_codex_permission_hook(env)
-        args = self._build_args(cmd, resume=resume)
+        args = self._build_args(cmd, resume=resume, prompt=prompt, image_paths=image_paths)
 
         self._proc = subprocess.Popen(
             args,
@@ -189,13 +195,27 @@ class PtySession:
             self._hook_task = asyncio.create_task(self._watch_codex_permission_requests(hook_file))
         self._read_task = asyncio.create_task(self._read_loop())
 
-    def _build_args(self, cmd: list[str], *, resume: bool) -> list[str]:
-        args = self._build_tool_args(cmd, resume=resume)
+    def _build_args(
+        self,
+        cmd: list[str],
+        *,
+        resume: bool,
+        prompt: str | None = None,
+        image_paths: Sequence[str | Path] | None = None,
+    ) -> list[str]:
+        args = self._build_tool_args(cmd, resume=resume, prompt=prompt, image_paths=image_paths)
         if self.launch_mode == "custom":
             return [os.environ.get(CUSTOM_LAUNCH_SHELL_ENV, "/bin/sh"), "-lc", self._render_launch_command(args)]
         return args
 
-    def _build_tool_args(self, cmd: list[str], *, resume: bool) -> list[str]:
+    def _build_tool_args(
+        self,
+        cmd: list[str],
+        *,
+        resume: bool,
+        prompt: str | None = None,
+        image_paths: Sequence[str | Path] | None = None,
+    ) -> list[str]:
         args = list(cmd)
         if self.tool == "claude":
             if resume and self.resume_token:
@@ -209,10 +229,19 @@ class PtySession:
             args.extend(["--cd", self.work_dir])
             if resume:
                 args.append("resume")
+                for image_path in image_paths or ():
+                    args.extend(["--image", str(image_path)])
                 if self.resume_token:
                     args.append(self.resume_token)
                 else:
                     args.append("--last")
+                if prompt:
+                    args.append(prompt)
+            else:
+                for image_path in image_paths or ():
+                    args.extend(["--image", str(image_path)])
+                if prompt:
+                    args.append(prompt)
         return args
 
     def _render_launch_command(self, tool_args: list[str]) -> str:
@@ -310,6 +339,13 @@ class PtySession:
             os.write(self._master_fd, data.encode("utf-8"))
             if data and self.needs_input:
                 self._schedule_input_resolved()
+
+    async def send_image_to_codex(self, *, image_path: str | Path, prompt: str) -> None:
+        if self.tool != "codex":
+            raise ValueError("Screenshot paste is currently supported for Codex sessions only")
+        prompt = prompt.strip() or "Use this screenshot as context."
+        image_path = str(Path(image_path).expanduser())
+        await self._restart_for_codex_image(prompt=prompt, image_path=image_path)
 
     def resize(self, cols: int, rows: int) -> None:
         """Resize the PTY terminal."""
@@ -409,6 +445,45 @@ class PtySession:
             logger.warning("PTY session %s still running during resume; terminating before restart", self.id)
             self._terminate_process()
             await asyncio.to_thread(self._proc.wait)
+
+    async def _restart_for_codex_image(self, *, prompt: str, image_path: str) -> None:
+        if self.status == "running" and self.tool == "codex" and not self.resume_token:
+            self.resume_token = self._latest_codex_session_id()
+        if self._proc and self._proc.poll() is None:
+            self._exit_status = "paused"
+            self.status = "paused"
+            if self.needs_input:
+                await self._mark_input_resolved()
+            if self._request_tui_exit():
+                await self._wait_for_current_process_exit()
+            else:
+                self._terminate_process()
+                await self._wait_for_current_process_exit()
+        if self.tool == "codex" and not self.resume_token:
+            self.resume_token = self._latest_codex_session_id()
+        await self._spawn(resume=bool(self.resume_token), prompt=prompt, image_paths=[image_path])
+
+    async def _wait_for_current_process_exit(self) -> None:
+        proc = self._proc
+        read_task = self._read_task
+        if read_task and not read_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(read_task), timeout=PAUSE_EXIT_GRACE_SECONDS)
+                return
+            except TimeoutError:
+                logger.warning("PTY session %s did not exit before image attach; terminating", self.id)
+                self._terminate_process()
+                try:
+                    await asyncio.wait_for(asyncio.shield(read_task), timeout=PAUSE_EXIT_GRACE_SECONDS)
+                    return
+                except TimeoutError:
+                    logger.warning("PTY session %s still running after image attach termination", self.id)
+        if proc and proc.poll() is None:
+            try:
+                await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=PAUSE_EXIT_GRACE_SECONDS)
+            except TimeoutError:
+                self._terminate_process()
+                await asyncio.to_thread(proc.wait)
 
     def to_info(self) -> PtySessionInfo:
         return PtySessionInfo(

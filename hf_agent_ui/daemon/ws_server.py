@@ -9,9 +9,11 @@ import websockets
 from websockets.asyncio.server import Server, ServerConnection
 
 from .pty_session import PtySession
+from .session_assets import SessionImageError, save_session_image
 from .session_manager import AnySession, SessionManager
 
 logger = logging.getLogger(__name__)
+MAX_WS_MESSAGE_BYTES = 12 * 1024 * 1024
 
 
 class DaemonWsServer:
@@ -24,6 +26,7 @@ class DaemonWsServer:
       { type: "pty.create", workDir, tool?, cols?, rows?, launchMode?, launchCommand?, launchLabel? }
       { type: "pty.input", sessionId, data }
       { type: "pty.resize", sessionId, cols, rows }
+      { type: "session.image.send", sessionId, filename, mimeType, dataBase64, prompt }
       { type: "session.stop", sessionId }
       { type: "session.pause", sessionId }
       { type: "session.resume", sessionId }
@@ -37,6 +40,7 @@ class DaemonWsServer:
       { type: "pty.created", session: PtySessionInfo }
       { type: "pty.output", sessionId, data }
       { type: "pty.exit", sessionId, code }
+      { type: "session.image.sent", sessionId, path, mimeType, size, session }
       { type: "session.input_required", sessionId, reason, source, kind?, title?, message?, detectedAt? }
       { type: "session.input_resolved", sessionId }
       { type: "session.subscribed", session }
@@ -53,7 +57,12 @@ class DaemonWsServer:
         self._session_callbacks: dict[Any, dict[str, Any]] = {}
 
     async def start(self) -> None:
-        self._server = await websockets.serve(self._handle_connection, "0.0.0.0", self.port)
+        self._server = await websockets.serve(
+            self._handle_connection,
+            "0.0.0.0",
+            self.port,
+            max_size=MAX_WS_MESSAGE_BYTES,
+        )
         logger.info("Daemon WebSocket server listening on ws://0.0.0.0:%d", self.port)
 
     async def stop(self) -> None:
@@ -132,6 +141,51 @@ class DaemonWsServer:
                 if not session or not isinstance(session, PtySession):
                     return
                 session.resize(req.get("cols", 120), req.get("rows", 40))
+
+            case "session.image.send":
+                session = self.manager.get(req.get("sessionId", ""))
+                if not session or not isinstance(session, PtySession):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"PTY session not found: {req.get('sessionId')}",
+                        "requestType": msg_type,
+                    })
+                    return
+                if session.tool != "codex":
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": "Screenshot paste is currently supported for Codex sessions only",
+                        "requestType": msg_type,
+                        "sessionId": session.id,
+                    })
+                    return
+                try:
+                    image = save_session_image(
+                        session_id=session.id,
+                        filename=req.get("filename"),
+                        mime_type=req.get("mimeType"),
+                        data_base64=req.get("dataBase64"),
+                    )
+                    prompt = req.get("prompt", "")
+                    await session.send_image_to_codex(
+                        image_path=image.path,
+                        prompt=prompt if isinstance(prompt, str) else "",
+                    )
+                    await self._send(ws, {
+                        "type": "session.image.sent",
+                        "sessionId": session.id,
+                        "path": str(image.path),
+                        "mimeType": image.mime_type,
+                        "size": image.size,
+                        "session": json.loads(json.dumps(session.to_info().__dict__, default=str)),
+                    })
+                except (SessionImageError, ValueError) as exc:
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": str(exc),
+                        "requestType": msg_type,
+                        "sessionId": session.id,
+                    })
 
             case "session.subscribe":
                 session = self.manager.get(req.get("sessionId", ""))

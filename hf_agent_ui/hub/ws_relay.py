@@ -24,6 +24,7 @@ class WsRelay:
       -> { type: "pty.create", daemonId, workDir, tool?, cols?, rows? }
       -> { type: "pty.input", daemonId, sessionId, data }
       -> { type: "pty.resize", daemonId, sessionId, cols, rows }
+      -> { type: "session.image.send", daemonId, sessionId, filename, mimeType, dataBase64, prompt }
       -> { type: "session.stop", daemonId, sessionId }
       -> { type: "session.list", daemonId }
       -> { type: "session.subscribe", daemonId, sessionId }
@@ -31,6 +32,7 @@ class WsRelay:
       <- { type: "pty.created", daemonId, session }
       <- { type: "pty.output", daemonId, sessionId, data }
       <- { type: "pty.exit", daemonId, sessionId, code }
+      <- { type: "session.image.sent", daemonId, sessionId, path, mimeType, size, session }
       <- { type: "session.input_required", daemonId, sessionId, reason, source, kind?, title?, message?, detectedAt? }
       <- { type: "session.input_resolved", daemonId, sessionId }
       <- { type: "session.subscribed", daemonId, session }
@@ -125,6 +127,12 @@ class WsRelay:
             self._pending_requests[(daemon_id, "session.list")].append(ws)
             return
 
+        if msg_type == "session.image.send":
+            self._pending_requests[(daemon_id, "session.image.send")].append(ws)
+            if isinstance(session_id, str) and session_id:
+                self._session_subscribers[(daemon_id, session_id)].add(ws)
+            return
+
         if isinstance(session_id, str) and session_id:
             self._session_subscribers[(daemon_id, session_id)].add(ws)
 
@@ -154,6 +162,13 @@ class WsRelay:
             if session_id:
                 return set(self._session_subscribers.get((daemon_id, session_id), set()))
             return set()
+
+        if msg_type == "session.image.sent":
+            targets = set(self._session_subscribers.get((daemon_id, session_id), set())) if session_id else set()
+            target = self._pop_pending(daemon_id, "session.image.send")
+            if target:
+                targets.add(target)
+            return targets
 
         if msg_type == "error":
             request_type = msg.get("requestType")

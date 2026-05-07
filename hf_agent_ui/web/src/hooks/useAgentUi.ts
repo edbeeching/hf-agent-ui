@@ -13,6 +13,13 @@ export interface LaunchOptions {
   launchLabel?: string
 }
 
+export interface SessionImagePayload {
+  filename: string
+  mimeType: string
+  dataBase64: string
+  prompt: string
+}
+
 export interface Daemon {
   id: string
   name: string
@@ -257,6 +264,18 @@ export function useAgentUi(enabled = true) {
         updateSessionInputRequired(sessionId, false)
         break
       }
+
+      case 'session.image.sent': {
+        if (!daemonId || !sessionId || !msg.session) return
+        const session = normalizeSession(msg.session)
+        setState(s => {
+          const sessions = new Map(s.sessions)
+          const list = sessions.get(daemonId) || []
+          sessions.set(daemonId, upsertSession(list, session))
+          return { ...s, sessions }
+        })
+        break
+      }
     }
   }, [updateSessionInputRequired, updateSessionStatus])
 
@@ -346,6 +365,22 @@ export function useAgentUi(enabled = true) {
     if (data) updateSessionInputRequired(sessionId, false)
   }, [send, updateSessionInputRequired])
 
+  const sendSessionImage = useCallback((
+    daemonId: string,
+    sessionId: string,
+    image: SessionImagePayload,
+  ) => {
+    send({
+      type: 'session.image.send',
+      daemonId,
+      sessionId,
+      filename: image.filename,
+      mimeType: image.mimeType,
+      dataBase64: image.dataBase64,
+      prompt: image.prompt,
+    })
+  }, [send])
+
   const resizePty = useCallback((daemonId: string, sessionId: string, cols: number, rows: number) => {
     send({ type: 'pty.resize', daemonId, sessionId, cols, rows })
   }, [send])
@@ -397,6 +432,7 @@ export function useAgentUi(enabled = true) {
     ...state,
     createPtySession,
     sendPtyInput,
+    sendSessionImage,
     resizePty,
     stopSession,
     removeSession,

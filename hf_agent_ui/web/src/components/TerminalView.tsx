@@ -1,14 +1,19 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import type { InputRequiredKind } from '../hooks/useAgentUi'
+import type { InputRequiredKind, SessionImagePayload } from '../hooks/useAgentUi'
 import 'xterm/css/xterm.css'
+
+const MAX_PASTE_IMAGE_BYTES = 8 * 1024 * 1024
+const DEFAULT_SCREENSHOT_PROMPT = 'Use this screenshot as context.'
+const ALLOWED_PASTE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 interface Props {
   sessionId: string
   onInput: (data: string) => void
   onResize: (cols: number, rows: number) => void
+  onSendImage?: (image: SessionImagePayload) => void
   output: string[]
   visible?: boolean
   needsInput?: boolean
@@ -21,6 +26,7 @@ export function TerminalView({
   sessionId,
   onInput,
   onResize,
+  onSendImage,
   output,
   visible = true,
   needsInput = false,
@@ -34,6 +40,9 @@ export function TerminalView({
   const writtenRef = useRef(0)
   const onInputRef = useRef(onInput)
   const onResizeRef = useRef(onResize)
+  const pendingPreviewUrlRef = useRef<string | null>(null)
+  const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null)
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null)
 
   useEffect(() => {
     onInputRef.current = onInput
@@ -42,6 +51,15 @@ export function TerminalView({
   useEffect(() => {
     onResizeRef.current = onResize
   }, [onResize])
+
+  useEffect(() => {
+    return () => {
+      if (pendingPreviewUrlRef.current) {
+        URL.revokeObjectURL(pendingPreviewUrlRef.current)
+        pendingPreviewUrlRef.current = null
+      }
+    }
+  }, [])
 
   // Initialize terminal
   useEffect(() => {
@@ -142,8 +160,79 @@ export function TerminalView({
     )
   }
 
+  function handlePaste(event: ClipboardEvent<HTMLDivElement>): void {
+    const image = imageFileFromClipboard(event.clipboardData)
+    if (!image) return
+    event.preventDefault()
+    setPasteNotice(null)
+
+    if (tool !== 'codex') {
+      setPasteNotice('Screenshot paste is currently supported for Codex sessions only.')
+      return
+    }
+    if (!onSendImage) {
+      setPasteNotice('Screenshot paste is unavailable for this session.')
+      return
+    }
+    if (!ALLOWED_PASTE_IMAGE_TYPES.has(image.type)) {
+      setPasteNotice('Unsupported screenshot type.')
+      return
+    }
+    if (image.size > MAX_PASTE_IMAGE_BYTES) {
+      setPasteNotice('Screenshot is too large.')
+      return
+    }
+
+    const previewUrl = URL.createObjectURL(image)
+    if (pendingPreviewUrlRef.current) {
+      URL.revokeObjectURL(pendingPreviewUrlRef.current)
+    }
+    pendingPreviewUrlRef.current = previewUrl
+    setPendingScreenshot({
+      file: image,
+      previewUrl,
+      prompt: DEFAULT_SCREENSHOT_PROMPT,
+      sending: false,
+      error: null,
+    })
+  }
+
+  async function handleScreenshotSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    if (!pendingScreenshot || !onSendImage) return
+
+    setPendingScreenshot(current => current ? { ...current, sending: true, error: null } : current)
+    try {
+      const dataBase64 = await fileToBase64(pendingScreenshot.file)
+      onSendImage({
+        filename: pendingScreenshot.file.name || fallbackImageFilename(pendingScreenshot.file.type),
+        mimeType: pendingScreenshot.file.type,
+        dataBase64,
+        prompt: pendingScreenshot.prompt.trim() || DEFAULT_SCREENSHOT_PROMPT,
+      })
+      URL.revokeObjectURL(pendingScreenshot.previewUrl)
+      pendingPreviewUrlRef.current = null
+      setPendingScreenshot(null)
+      setPasteNotice('Screenshot sent to Codex.')
+    } catch {
+      setPendingScreenshot(current => current ? {
+        ...current,
+        sending: false,
+        error: 'Could not read screenshot data.',
+      } : current)
+    }
+  }
+
+  function closeScreenshotDialog(): void {
+    setPendingScreenshot(current => {
+      if (current) URL.revokeObjectURL(current.previewUrl)
+      pendingPreviewUrlRef.current = null
+      return null
+    })
+  }
+
   return (
-    <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`}>
+    <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`} onPasteCapture={handlePaste}>
       {needsInput && (
         <div className="input-required-banner" role="status">
           <span className={`input-required-banner-label ${inputKind || 'prompt'}`}>
@@ -154,9 +243,54 @@ export function TerminalView({
           </span>
         </div>
       )}
+      {pasteNotice && (
+        <div className="screenshot-paste-notice" role="status">
+          {pasteNotice}
+          <button type="button" onClick={() => setPasteNotice(null)} aria-label="Dismiss screenshot notice">
+            x
+          </button>
+        </div>
+      )}
+      {pendingScreenshot && (
+        <form className="screenshot-paste-card" onSubmit={handleScreenshotSubmit}>
+          <img src={pendingScreenshot.previewUrl} alt="Pasted screenshot preview" />
+          <label>
+            Prompt
+            <textarea
+              value={pendingScreenshot.prompt}
+              onChange={(event) => setPendingScreenshot(current => current ? {
+                ...current,
+                prompt: event.target.value,
+                error: null,
+              } : current)}
+              rows={3}
+              disabled={pendingScreenshot.sending}
+            />
+          </label>
+          {pendingScreenshot.error && (
+            <div className="screenshot-paste-error">{pendingScreenshot.error}</div>
+          )}
+          <div className="screenshot-paste-actions">
+            <button type="button" onClick={closeScreenshotDialog} disabled={pendingScreenshot.sending}>
+              Cancel
+            </button>
+            <button type="submit" disabled={pendingScreenshot.sending}>
+              {pendingScreenshot.sending ? 'Sending' : 'Send'}
+            </button>
+          </div>
+        </form>
+      )}
       <div ref={containerRef} className="terminal-container" />
     </div>
   )
+}
+
+interface PendingScreenshot {
+  file: File
+  previewUrl: string
+  prompt: string
+  sending: boolean
+  error: string | null
 }
 
 function terminalFontSize(): number {
@@ -188,6 +322,37 @@ function safeTerminalLink(uri: string): string | null {
     return null
   }
   return null
+}
+
+function imageFileFromClipboard(data: DataTransfer): File | null {
+  for (const item of data.items) {
+    if (!item.type.startsWith('image/')) continue
+    const file = item.getAsFile()
+    if (file) return file
+  }
+  return null
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => {
+      const result = reader.result
+      if (typeof result !== 'string') {
+        reject(new Error('Unexpected file reader result'))
+        return
+      }
+      resolve(result.split(',', 2)[1] || '')
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function fallbackImageFilename(mimeType: string): string {
+  if (mimeType === 'image/jpeg') return 'screenshot.jpg'
+  if (mimeType === 'image/webp') return 'screenshot.webp'
+  return 'screenshot.png'
 }
 
 function toolLabel(tool?: string): string {
