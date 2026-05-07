@@ -6,6 +6,6 @@
 .worktrees
 __pycache__
 node_modules
-switch/web/dist
-switch/web/node_modules
+hf_agent_ui/web/dist
+hf_agent_ui/web/node_modules
 tests

@@ -66,6 +66,8 @@ jobs:
       - name: Upload Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_AGENT_UI_DEV_SPACE_REPO_ID: ${{ vars.HF_AGENT_UI_DEV_SPACE_REPO_ID }}
+          HF_AGENT_UI_PROD_SPACE_REPO_ID: ${{ vars.HF_AGENT_UI_PROD_SPACE_REPO_ID }}
         run: |
           python - <<'PY'
           import json
@@ -98,8 +100,8 @@ jobs:
                   raise SystemExit(f"Unknown deploy target: {target}")
 
           space_by_branch = {
-              "main": "edbeeching/agentic-ui-dev",
-              "prod": "edbeeching/agentic-ui",
+              "main": os.environ.get("HF_AGENT_UI_DEV_SPACE_REPO_ID") or "edbeeching/hf-agent-ui-dev",
+              "prod": os.environ.get("HF_AGENT_UI_PROD_SPACE_REPO_ID") or "edbeeching/hf-agent-ui",
           }
           repo_id = space_by_branch.get(branch)
           if not repo_id:
@@ -115,7 +117,7 @@ jobs:
               "README.md",
               "pyproject.toml",
               "uv.lock",
-              "switch/**",
+              "hf_agent_ui/**",
           ]
 
           ignored_patterns = [
@@ -132,7 +134,7 @@ jobs:
               allow_patterns=managed_patterns,
               delete_patterns=managed_patterns,
               ignore_patterns=ignored_patterns,
-              commit_message=f"Deploy agentic-ui {branch} {sha[:7]}",
+              commit_message=f"Deploy hf-agent-ui {branch} {sha[:7]}",
               commit_description=(
                   f"Source: {server}/{repo}/commit/{sha}\n"
                   f"Run: {server}/{repo}/actions/runs/{run_id}\n"

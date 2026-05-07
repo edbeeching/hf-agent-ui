@@ -1,14 +1,16 @@
 ---
-title: agentic-ui
+title: hf-agent-ui
 sdk: docker
 app_port: 7860
 fullWidth: true
 header: mini
+hf_oauth: true
+hf_oauth_expiration_minutes: 43200
 ---
 
-# agentic-ui
+# hf-agent-ui
 
-Browser control for AI coding sessions. agentic-ui manages Claude Code and Codex CLI sessions across local machines, remote servers, and cloud/container agent hosts from one web UI.
+Browser control for AI coding sessions. hf-agent-ui manages Claude Code and Codex CLI sessions across local machines, remote servers, and cloud/container agent hosts from one web UI.
 
 ## Architecture
 
@@ -21,16 +23,24 @@ Browser <--WS--> Hub (FastAPI) <--WS--> Agent host (Python) <--stdio--> Claude /
 
 ## Install
 
-The project is currently private and not published as an official package:
+Install from the GitHub repository with `uv`:
 
 ```bash
-uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git
+uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
+```
+
+If you previously installed the project as `switch`, remove the old tool and use the new command name:
+
+```bash
+uv tool uninstall switch
+uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
+hf-agent-ui --help
 ```
 
 Update an installed copy:
 
 ```bash
-switch update
+hf-agent-ui update
 ```
 
 ## Quick Start
@@ -38,7 +48,7 @@ switch update
 Start the hub:
 
 ```bash
-switch hub
+hf-agent-ui hub
 ```
 
 Open `http://localhost:9341`.
@@ -46,20 +56,20 @@ Open `http://localhost:9341`.
 For single-machine development or debugging, start the hub with a local agent host:
 
 ```bash
-switch hub --local-agent-host
+hf-agent-ui hub --local-agent-host
 ```
 
 To connect another machine to a hub:
 
 ```bash
-switch host --hub http://<hub-host>:9341
+hf-agent-ui host --hub http://<hub-host>:9341
 ```
 
-By default `switch hub` binds to `127.0.0.1`. To expose it on a network interface, configure browser auth first:
+By default `hf-agent-ui hub` binds to `127.0.0.1`. To expose it on a network interface, configure browser auth first:
 
 ```bash
-export SWITCH_UI_TOKEN=<browser-token>
-switch hub --host 0.0.0.0
+export HF_AGENT_UI_BROWSER_TOKEN=<browser-token>
+hf-agent-ui hub --host 0.0.0.0
 ```
 
 Open the UI once with:
@@ -74,12 +84,12 @@ http://<hub-host>:9341/#uiToken=<browser-token>
 
 | Environment | Branch | Space | URL | Deploy behavior |
 |-------------|--------|-------|-----|-----------------|
-| Development | `main` | `edbeeching/agentic-ui-dev` | `https://edbeeching-agentic-ui-dev.hf.space` | Auto-deploy after `main` CI passes |
-| Production | `prod` | `edbeeching/agentic-ui` | `https://edbeeching-agentic-ui.hf.space` | Manual deploy from `prod` with explicit production confirmation |
+| Development | `main` | `edbeeching/hf-agent-ui-dev` | `https://edbeeching-hf-agent-ui-dev.hf.space` | Auto-deploy after `main` CI passes |
+| Production | `prod` | `edbeeching/hf-agent-ui` | `https://edbeeching-hf-agent-ui.hf.space` | Manual deploy from `prod` with explicit production confirmation |
 
 Feature work should land through PRs into `main`. Production release candidates should be PRs from `main` into `prod` after the dev Space has been validated.
 
-Branch protection and required environment reviewers are not currently enforceable for this private repository setup. Production deploys are therefore not automatic: the deploy workflow must be run manually from `prod` with `target=production` and the exact confirmation phrase `deploy production`.
+Production deploys are not automatic: the deploy workflow must be run manually from `prod` with `target=production` and the exact confirmation phrase `deploy production`.
 
 ## Hugging Face Spaces
 
@@ -88,60 +98,77 @@ Both Spaces are private Docker Spaces using the front matter at the top of this 
 ```yaml
 sdk: docker
 app_port: 7860
+hf_oauth: true
 ```
 
 Each Space needs:
 
 ```bash
-SWITCH_DAEMON_TOKEN=<environment-specific-shared-secret>
+HF_AGENT_UI_AUTH_MODE=hf-oauth
+HF_AGENT_UI_TRUST_PROXY_AUTH=1
+HF_AGENT_UI_SPACE_REPO_ID=<space-repo-id>
 HF_TOKEN=<hf-token-with-space-and-jobs-access>
 ```
 
-Each Space also needs:
+Use `HF_AGENT_UI_SPACE_REPO_ID=edbeeching/hf-agent-ui-dev` for dev and `HF_AGENT_UI_SPACE_REPO_ID=edbeeching/hf-agent-ui` for prod.
+
+Recommended Space variable:
 
 ```bash
-SWITCH_TRUST_PROXY_AUTH=1
-SWITCH_HF_SPACE_REPO_ID=<space-repo-id>
+HF_AGENT_UI_USER_TOKEN_SECRET=<stable-random-secret>
 ```
 
-Use `SWITCH_HF_SPACE_REPO_ID=edbeeching/agentic-ui-dev` for dev and `SWITCH_HF_SPACE_REPO_ID=edbeeching/agentic-ui` for prod.
+`HF_AGENT_UI_USER_TOKEN_SECRET` signs per-user agent-host tokens. If it is omitted, hf-agent-ui falls back to the OAuth client secret.
+
+For single-user/local deployments without Hugging Face OAuth, keep using a shared host token:
+
+```bash
+HF_AGENT_UI_AUTH_MODE=single
+HF_AGENT_UI_HOST_TOKEN=<environment-specific-shared-secret>
+```
 
 For private/internal single-user Spaces only, you can optionally expose the agent-host token in the web UI copy command:
 
 ```bash
-SWITCH_UNSAFE_EXPOSE_HOST_TOKEN=1
+HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN=1
 ```
 
-To connect an agent host to a Space:
+To connect an agent host to a Space, sign in to the Space UI and use the exact copy command shown there. It includes a token scoped to your Hugging Face account:
 
 ```bash
-uv -vv tool install --force --reinstall git+ssh://git@github.com/edbeeching/agentic-ui.git
+uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
 export HF_TOKEN=<hf-token>
-export SWITCH_DAEMON_TOKEN=<environment-specific-shared-secret>
-switch host --hub https://<space-subdomain>.hf.space
+hf-agent-ui host --hub https://<space-subdomain>.hf.space --token <copy-from-ui>
+```
+
+The public Space names are:
+
+```text
+Development: https://edbeeching-hf-agent-ui-dev.hf.space
+Production:  https://edbeeching-hf-agent-ui.hf.space
 ```
 
 ### Cloud Agent Hosts
 
-The Space UI can launch an agent host as a Hugging Face Job. The Space-side `HF_TOKEN` and `SWITCH_DAEMON_TOKEN` secrets are passed server-side to the job; they are not returned to the browser.
+Cloud agent host support through Hugging Face Jobs is implemented behind a hidden frontend flag while the UX is still being iterated. When enabled, the Space-side `HF_TOKEN` and the current user's signed host token are passed server-side to the job; they are not returned to the browser response.
 
 Optional Space variables:
 
 ```bash
-SWITCH_HF_JOBS_NAMESPACE=edbeeching
-SWITCH_HF_JOBS_DEFAULT_IMAGE=python:3.12
-SWITCH_HF_JOBS_DEFAULT_FLAVOR=cpu-basic
-SWITCH_HF_JOBS_DEFAULT_TIMEOUT=2h
+HF_AGENT_UI_JOBS_NAMESPACE=edbeeching
+HF_AGENT_UI_JOBS_DEFAULT_IMAGE=python:3.12
+HF_AGENT_UI_JOBS_DEFAULT_FLAVOR=cpu-basic
+HF_AGENT_UI_JOBS_DEFAULT_TIMEOUT=2h
 ```
 
-The default image installs agentic-ui from the private Space repo and connects back to the hub. Images used for real sessions must also include Claude Code or Codex CLI and any credentials those tools require.
+The default image installs hf-agent-ui from the configured Space snapshot and connects back to the hub. Images used for real sessions must also include Claude Code or Codex CLI and any credentials those tools require.
 
 ## Release Flow
 
 1. Create a feature branch from `main`.
 2. Open a PR into `main`.
 3. Merge after CI passes; the dev Space deploys automatically.
-4. Validate `https://edbeeching-agentic-ui-dev.hf.space`.
+4. Validate `https://edbeeching-hf-agent-ui-dev.hf.space`.
 5. Open a PR from `main` into `prod`.
 6. Merge after CI passes.
 7. Manually run `Deploy HF Space` from the `prod` branch.
@@ -149,40 +176,39 @@ The default image installs agentic-ui from the private Space repo and connects b
 
 The GitHub workflow `Deploy HF Space` selects the Space target from the branch that passed CI:
 
-- successful `main` push CI deploys to `edbeeching/agentic-ui-dev`.
-- manual confirmed `prod` workflow runs deploy to `edbeeching/agentic-ui`.
+- successful `main` push CI deploys to `edbeeching/hf-agent-ui-dev`.
+- manual confirmed `prod` workflow runs deploy to `edbeeching/hf-agent-ui`.
 
 The workflow uses the GitHub Actions repository secret `HF_TOKEN` to upload to both Spaces.
 
 ## CLI Reference
 
 ```text
-switch hub    [-p PORT] [--host HOST] [--local-agent-host] [--allow-insecure] [-v]
-switch host   [--hub URL] [--token TOKEN] [--hf-token TOKEN] [-n NAME] [-v]
-switch daemon Backward-compatible alias for switch host
-switch update Update the installed tool from the private repo
+hf-agent-ui hub    [-p PORT] [--host HOST] [--local-agent-host] [--allow-insecure] [-v]
+hf-agent-ui host   [--hub URL] [--token TOKEN] [--hf-token TOKEN] [-n NAME] [-v]
+hf-agent-ui update Update the installed tool from the GitHub repo
 ```
 
 ## Development
 
 ```bash
-git clone git@github.com:edbeeching/agentic-ui.git
-cd agentic-ui
+git clone https://github.com/edbeeching/hf-agent-ui.git
+cd hf-agent-ui
 uv tool install --force --editable .
 ```
 
-This links the `switch` command to your local checkout. Python changes take effect immediately.
+This links the `hf-agent-ui` command to your local checkout. Python changes take effect immediately.
 
 Run the all-in-one local dev command:
 
 ```bash
-switch dev
+hf-agent-ui dev
 ```
 
 Rebuild the production web bundle after frontend changes:
 
 ```bash
-cd switch/web
+cd hf_agent_ui/web
 npm install
 npm run build
 cp -r dist/* ../hub/static/
@@ -192,8 +218,8 @@ Run checks before opening a PR:
 
 ```bash
 uv run --frozen pytest
-cd switch/web && npm run lint && npm run build
-diff -qr switch/web/dist switch/hub/static
+cd hf_agent_ui/web && npm run lint && npm run build
+diff -qr hf_agent_ui/web/dist hf_agent_ui/hub/static
 ```
 
 ### Worktrees
@@ -205,7 +231,7 @@ mkdir -p .worktrees
 git worktree add .worktrees/<name> -b <branch> origin/main
 ```
 
-The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to the repo, such as `../agentic-ui-main`, because those paths may sit outside an agent's writable workspace root.
+The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to the repo, such as `../hf-agent-ui-main`, because those paths may sit outside an agent's writable workspace root.
 
 ## Supported Tools
 
@@ -216,7 +242,8 @@ The `.worktrees/` directory is ignored by Git. Avoid placing worktrees next to t
 
 ## Security Notes
 
-- Keep dev and prod `SWITCH_DAEMON_TOKEN` values separate.
-- Do not expose `SWITCH_UNSAFE_EXPOSE_HOST_TOKEN=1` outside trusted private single-user Spaces.
+- Keep dev and prod OAuth client secrets and `HF_AGENT_UI_USER_TOKEN_SECRET` values separate.
+- In single-user mode, keep dev and prod `HF_AGENT_UI_HOST_TOKEN` values separate.
+- Do not expose `HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN=1` outside trusted private single-user deployments.
 - Cloud agent hosts are intentionally powerful; only launch trusted images with the credentials needed for the intended work.
 - See [SECURITY.md](SECURITY.md) for the current security posture and reporting guidance.

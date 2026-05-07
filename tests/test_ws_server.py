@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import stat
 import sys
 from pathlib import Path
 
 import pytest
 import websockets
 
-from switch.daemon.pty_session import TOOL_COMMANDS
-from switch.daemon.session_manager import SessionManager
-from switch.daemon.ws_server import DaemonWsServer
+from hf_agent_ui.daemon.pty_session import TOOL_COMMANDS
+from hf_agent_ui.daemon.session_manager import SessionManager
+from hf_agent_ui.daemon.ws_server import DaemonWsServer
 
 MOCK_CLI = str(Path(__file__).parent / "mock_cli.py")
+PNG_BYTES = b"\x89PNG\r\n\x1a\nfake-png"
 
 
 @pytest.fixture
@@ -22,6 +25,15 @@ def _register_mock_pty_tool():
     TOOL_COMMANDS["mock"] = [sys.executable, MOCK_CLI]
     yield
     del TOOL_COMMANDS["mock"]
+
+
+@pytest.fixture
+def _mock_codex_tool():
+    """Temporarily point the default Codex tool at the mock CLI."""
+    original = TOOL_COMMANDS["codex"]
+    TOOL_COMMANDS["codex"] = [sys.executable, MOCK_CLI]
+    yield
+    TOOL_COMMANDS["codex"] = original
 
 
 async def _send_recv(ws, data: dict) -> list[dict]:
@@ -83,6 +95,29 @@ async def test_create_pty_session_via_ws(tmp_path: Path) -> None:
 
             session_id = created["session"]["id"]
             assert manager.get(session_id) is not None
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_create_pty_session_defaults_to_codex_via_ws(tmp_path: Path) -> None:
+    """Omitting tool from pty.create starts the default Codex session."""
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["tool"] == "codex"
     finally:
         manager.stop_all()
         await server.stop()
@@ -282,6 +317,10 @@ async def test_input_required_event_and_clear_via_ws(tmp_path: Path) -> None:
             required = next(m for m in msgs if m["type"] == "session.input_required")
             assert required["sessionId"] == session_id
             assert required["source"] == "pty"
+            assert required["kind"] == "permission"
+            assert required["title"] == "Permission required"
+            assert required["message"] == "Permission required"
+            assert isinstance(required["detectedAt"], str)
             assert "permission" in required["reason"].lower()
 
             await ws.send(json.dumps({
@@ -338,7 +377,7 @@ async def test_subscribe_replays_buffered_pty_output(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_pause_and_resume_session_via_ws(tmp_path: Path) -> None:
-    """Paused PTY sessions should keep their Switch id and resume into a running process."""
+    """Paused PTY sessions should keep their HF Agent UI id and resume into a running process."""
     manager = SessionManager(tmp_path / "state.json")
     server = DaemonWsServer(manager, 0)
     await server.start()
@@ -364,6 +403,107 @@ async def test_pause_and_resume_session_via_ws(tmp_path: Path) -> None:
             assert resumed["sessionId"] == session_id
             assert resumed["session"]["status"] == "running"
             assert manager.get(session_id).to_info().status == "running"
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_send_session_image_to_codex_via_ws(monkeypatch, tmp_path: Path) -> None:
+    """Pasted screenshots should be saved privately and used to relaunch Codex with an image."""
+    monkeypatch.setenv("HF_AGENT_UI_ASSET_CACHE_DIR", str(tmp_path / "assets"))
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "codex"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            await ws.send(json.dumps({
+                "type": "session.image.send",
+                "sessionId": session_id,
+                "filename": "screenshot.png",
+                "mimeType": "image/png",
+                "dataBase64": base64.b64encode(PNG_BYTES).decode(),
+                "prompt": "Use this screenshot",
+            }))
+            msgs = await _recv_until(ws, lambda m: m.get("type") == "session.image.sent")
+
+            sent = next(m for m in msgs if m["type"] == "session.image.sent")
+            image_path = Path(sent["path"])
+            assert sent["sessionId"] == session_id
+            assert sent["mimeType"] == "image/png"
+            assert sent["size"] == len(PNG_BYTES)
+            assert image_path.read_bytes() == PNG_BYTES
+            assert stat.S_IMODE(image_path.stat().st_mode) == 0o600
+            assert manager.get(session_id).status == "running"
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_send_session_image_rejects_non_codex_session(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_ASSET_CACHE_DIR", str(tmp_path / "assets"))
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "mock"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            msgs = await _send_recv(ws, {
+                "type": "session.image.send",
+                "sessionId": session_id,
+                "filename": "screenshot.png",
+                "mimeType": "image/png",
+                "dataBase64": base64.b64encode(PNG_BYTES).decode(),
+                "prompt": "Use this screenshot",
+            })
+
+            error = next(m for m in msgs if m["type"] == "error")
+            assert error["requestType"] == "session.image.send"
+            assert "Codex" in error["message"]
+            assert not (tmp_path / "assets").exists()
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_send_session_image_rejects_invalid_image(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HF_AGENT_UI_ASSET_CACHE_DIR", str(tmp_path / "assets"))
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "codex"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            msgs = await _send_recv(ws, {
+                "type": "session.image.send",
+                "sessionId": session_id,
+                "filename": "screenshot.jpg",
+                "mimeType": "image/jpeg",
+                "dataBase64": base64.b64encode(PNG_BYTES).decode(),
+                "prompt": "Use this screenshot",
+            })
+
+            error = next(m for m in msgs if m["type"] == "error")
+            assert error["requestType"] == "session.image.send"
+            assert "MIME" in error["message"]
     finally:
         manager.stop_all()
         await server.stop()

@@ -9,10 +9,22 @@ from pathlib import Path
 
 import pytest
 
-from switch.daemon.pty_session import TOOL_COMMANDS, PtySession
+from hf_agent_ui.daemon.pty_session import (
+    TOOL_COMMANDS,
+    PtySession,
+    _codex_hook_config_args,
+    _detect_claude_notification,
+    _detect_codex_permission_request,
+)
 
 
 MOCK_CLI = str(Path(__file__).parent / "mock_cli.py")
+
+
+def test_default_tool_is_codex(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path))
+
+    assert session.tool == "codex"
 
 
 def test_pause_exits_tui_cleanly_and_keeps_session_paused(tmp_path: Path) -> None:
@@ -81,6 +93,138 @@ def test_custom_launch_resume_uses_same_template(tmp_path: Path) -> None:
     args = session._build_args(["claude"], resume=True)
 
     assert args[2] == "launcher claude --resume claude-session"
+
+
+def test_bash_tool_builds_plain_shell_command(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path), tool="bash")
+
+    assert TOOL_COMMANDS["bash"] == ["bash"]
+    assert session._build_tool_args(["bash"], resume=False) == ["bash"]
+    assert session._build_tool_args(["bash"], resume=True) == ["bash"]
+    assert session._pause_exit_command() == "exit\r"
+
+
+def test_codex_hook_config_is_added_when_hook_enabled(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path), tool="codex")
+    session._codex_hook_enabled = True
+
+    args = session._build_tool_args(["codex"], resume=False)
+
+    assert args[0] == "codex"
+    assert "-c" in args
+    assert "features.codex_hooks=true" in args
+    assert any("hooks.PermissionRequest" in arg for arg in args)
+    assert args[-2:] == ["--cd", str(tmp_path.resolve())]
+
+
+def test_codex_initial_launch_can_attach_image_and_prompt(tmp_path: Path) -> None:
+    image_path = tmp_path / "screenshot.png"
+    session = PtySession(work_dir=str(tmp_path), tool="codex")
+
+    args = session._build_tool_args(
+        ["codex"],
+        resume=False,
+        image_paths=[image_path],
+        prompt="Use this screenshot",
+    )
+
+    assert args == [
+        "codex",
+        "--cd",
+        str(tmp_path.resolve()),
+        "--image",
+        str(image_path),
+        "Use this screenshot",
+    ]
+
+
+def test_codex_resume_launch_can_attach_image_and_prompt(tmp_path: Path) -> None:
+    image_path = tmp_path / "screenshot.png"
+    session = PtySession(
+        work_dir=str(tmp_path),
+        tool="codex",
+        resume_token="codex-session",
+    )
+
+    args = session._build_tool_args(
+        ["codex"],
+        resume=True,
+        image_paths=[image_path],
+        prompt="Use this screenshot",
+    )
+
+    assert args == [
+        "codex",
+        "--cd",
+        str(tmp_path.resolve()),
+        "resume",
+        "--image",
+        str(image_path),
+        "codex-session",
+        "Use this screenshot",
+    ]
+
+
+def test_non_codex_session_rejects_image_attach(tmp_path: Path) -> None:
+    async def run() -> None:
+        session = PtySession(work_dir=str(tmp_path), tool="bash")
+
+        with pytest.raises(ValueError, match="Codex"):
+            await session.send_image_to_codex(
+                image_path=tmp_path / "screenshot.png",
+                prompt="Use this screenshot",
+            )
+
+    asyncio.run(run())
+
+
+def test_codex_hook_config_runs_hf_agent_ui_hook() -> None:
+    config_args = _codex_hook_config_args()
+
+    assert "features.codex_hooks=true" in config_args
+    assert any("hf_agent_ui.daemon.codex_hook" in arg for arg in config_args)
+
+
+def test_claude_notification_type_maps_to_input_signal() -> None:
+    signal = _detect_claude_notification({
+        "hook_event_name": "Notification",
+        "notification_type": "permission_prompt",
+        "title": "Permission needed",
+        "message": "Claude needs your permission to use Bash",
+    })
+
+    assert signal is not None
+    assert signal.kind == "permission"
+    assert signal.title == "Permission needed"
+    assert signal.reason == "Claude needs your permission to use Bash"
+
+
+def test_claude_idle_notification_maps_to_prompt_signal() -> None:
+    signal = _detect_claude_notification({
+        "hook_event_name": "Notification",
+        "notification_type": "idle_prompt",
+        "message": "Claude is waiting for your input",
+    })
+
+    assert signal is not None
+    assert signal.kind == "prompt"
+    assert "waiting" in signal.reason.lower()
+
+
+def test_codex_permission_request_maps_to_input_signal() -> None:
+    signal = _detect_codex_permission_request({
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {
+            "description": "Run tests outside the sandbox",
+            "command": "pytest",
+        },
+    })
+
+    assert signal.kind == "permission"
+    assert signal.title == "Codex approval required"
+    assert signal.reason == "Run tests outside the sandbox"
+    assert signal.tool_name == "Bash"
 
 
 def test_terminate_process_targets_process_group(monkeypatch, tmp_path: Path) -> None:
