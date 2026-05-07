@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAgentUi } from './hooks/useAgentUi'
-import type { Daemon } from './hooks/useAgentUi'
+import type { Daemon, SessionImagePayload } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -43,6 +43,7 @@ function App() {
     ptyOutput,
     createPtySession,
     sendPtyInput,
+    sendSessionImage,
     resizePty,
     removeSession,
     listSessions,
@@ -173,6 +174,7 @@ function App() {
 
       <main className={`main-panel ${activeMobileView === 'terminal' ? 'mobile-active' : ''}`}>
         <TerminalView
+          key={activeSelected?.sessionId || 'empty'}
           sessionId={activeSelected?.sessionId || ''}
           output={selectedPtyOutput}
           visible={activeMobileView === 'terminal'}
@@ -182,6 +184,9 @@ function App() {
           tool={activeSession?.tool}
           onInput={data => {
             if (activeSelected) sendPtyInput(activeSelected.daemonId, activeSelected.sessionId, data)
+          }}
+          onSendImage={(image: SessionImagePayload) => {
+            if (activeSelected) sendSessionImage(activeSelected.daemonId, activeSelected.sessionId, image)
           }}
           onResize={(cols, rows) => {
             if (activeSelected) resizePty(activeSelected.daemonId, activeSelected.sessionId, cols, rows)

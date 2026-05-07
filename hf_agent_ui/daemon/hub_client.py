@@ -11,7 +11,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 import websockets
 
 from .session_manager import SessionManager
-from .ws_server import DaemonWsServer
+from .ws_server import MAX_WS_MESSAGE_BYTES, DaemonWsServer
 
 logger = logging.getLogger(__name__)
 HOST_TOKEN_HEADER = "X-HF-Agent-UI-Host-Token"
@@ -70,7 +70,11 @@ class HubDaemonClient:
         headers = _auth_headers(self.hf_token, host_token=self.token)
         logger.info("Connecting to hub at %s", _daemon_ws_url(self.hub_url))
 
-        async with websockets.connect(ws_url, additional_headers=headers) as ws:
+        async with websockets.connect(
+            ws_url,
+            additional_headers=headers,
+            max_size=MAX_WS_MESSAGE_BYTES,
+        ) as ws:
             await ws.send(json.dumps({
                 "type": "daemon.register",
                 "name": self.daemon_name,

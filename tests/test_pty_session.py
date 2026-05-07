@@ -117,6 +117,67 @@ def test_codex_hook_config_is_added_when_hook_enabled(tmp_path: Path) -> None:
     assert args[-2:] == ["--cd", str(tmp_path.resolve())]
 
 
+def test_codex_initial_launch_can_attach_image_and_prompt(tmp_path: Path) -> None:
+    image_path = tmp_path / "screenshot.png"
+    session = PtySession(work_dir=str(tmp_path), tool="codex")
+
+    args = session._build_tool_args(
+        ["codex"],
+        resume=False,
+        image_paths=[image_path],
+        prompt="Use this screenshot",
+    )
+
+    assert args == [
+        "codex",
+        "--cd",
+        str(tmp_path.resolve()),
+        "--image",
+        str(image_path),
+        "Use this screenshot",
+    ]
+
+
+def test_codex_resume_launch_can_attach_image_and_prompt(tmp_path: Path) -> None:
+    image_path = tmp_path / "screenshot.png"
+    session = PtySession(
+        work_dir=str(tmp_path),
+        tool="codex",
+        resume_token="codex-session",
+    )
+
+    args = session._build_tool_args(
+        ["codex"],
+        resume=True,
+        image_paths=[image_path],
+        prompt="Use this screenshot",
+    )
+
+    assert args == [
+        "codex",
+        "--cd",
+        str(tmp_path.resolve()),
+        "resume",
+        "--image",
+        str(image_path),
+        "codex-session",
+        "Use this screenshot",
+    ]
+
+
+def test_non_codex_session_rejects_image_attach(tmp_path: Path) -> None:
+    async def run() -> None:
+        session = PtySession(work_dir=str(tmp_path), tool="bash")
+
+        with pytest.raises(ValueError, match="Codex"):
+            await session.send_image_to_codex(
+                image_path=tmp_path / "screenshot.png",
+                prompt="Use this screenshot",
+            )
+
+    asyncio.run(run())
+
+
 def test_codex_hook_config_runs_hf_agent_ui_hook() -> None:
     config_args = _codex_hook_config_args()
 

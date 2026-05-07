@@ -67,6 +67,31 @@ def test_pty_events_target_subscribed_browser_only() -> None:
     assert browser_b not in output_targets
 
 
+def test_session_image_sent_targets_requesting_browser_and_subscribers() -> None:
+    relay = WsRelay(pool=None)  # type: ignore[arg-type]
+    browser_a = object()
+    browser_b = object()
+    browser_c = object()
+    relay._clients.update({browser_a, browser_b, browser_c})  # type: ignore[arg-type]
+
+    relay._track_browser_request(browser_a, "daemon-1", {  # type: ignore[arg-type]
+        "type": "session.image.send",
+        "sessionId": "session-1",
+    })
+    relay._track_browser_request(browser_b, "daemon-1", {  # type: ignore[arg-type]
+        "type": "pty.input",
+        "sessionId": "session-1",
+    })
+
+    targets = relay._targets_for_daemon_message("daemon-1", {
+        "type": "session.image.sent",
+        "sessionId": "session-1",
+    })
+
+    assert targets == {browser_a, browser_b}
+    assert browser_c not in targets
+
+
 @pytest.mark.asyncio
 async def test_browser_message_cannot_target_another_users_daemon() -> None:
     pool = FakePool(owned={("daemon-1", "alice")})
