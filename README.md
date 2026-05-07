@@ -26,14 +26,14 @@ Browser <--WS--> Hub (FastAPI) <--WS--> Agent host (Python) <--stdio--> Claude /
 Install from the GitHub repository with `uv`:
 
 ```bash
-uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
+uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
 ```
 
 If you previously installed the project as `switch`, remove the old tool and use the new command name:
 
 ```bash
 uv tool uninstall switch
-uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
+uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
 hf-agent-ui --help
 ```
 
@@ -136,7 +136,7 @@ HF_AGENT_UI_UNSAFE_EXPOSE_HOST_TOKEN=1
 To connect an agent host to a Space, sign in to the Space UI and use the exact copy command shown there. It includes a token scoped to your Hugging Face account:
 
 ```bash
-uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
+uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git
 export HF_TOKEN=<hf-token>
 hf-agent-ui host --hub https://<space-subdomain>.hf.space --token <copy-from-ui>
 ```

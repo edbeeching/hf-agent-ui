@@ -365,7 +365,7 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
   )
 }
 
-const DEFAULT_INSTALL_COMMAND = 'uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git'
+const DEFAULT_INSTALL_COMMAND = 'uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git'
 
 interface HfCloudConfig {
   enabled: boolean

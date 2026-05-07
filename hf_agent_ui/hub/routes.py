@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_browser_http), D
 public_router = APIRouter(prefix="/api")
 
 INSTALL_REPO_URL = "git+https://github.com/edbeeching/hf-agent-ui.git"
-INSTALL_COMMAND_PREFIX = "uv -vv tool install --force --reinstall"
+INSTALL_COMMAND_PREFIX = "uv tool install --force --reinstall"
 
 
 def _is_https_request(request: Request) -> bool:
