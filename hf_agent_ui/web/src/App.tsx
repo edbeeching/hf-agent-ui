@@ -138,12 +138,13 @@ function App() {
     <div className="app">
       <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
-          <div>
+          <div className="sidebar-account">
             <h1>hf-agent-ui</h1>
             {auth.user && (
-              <a className="user-link" href={auth.logoutUrl} title="Sign out">
-                {auth.user.username}
-              </a>
+              <div className="user-session">
+                <span className="user-name" title={auth.user.username}>{auth.user.username}</span>
+                <a className="logout-button" href={auth.logoutUrl}>Logout</a>
+              </div>
             )}
           </div>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
