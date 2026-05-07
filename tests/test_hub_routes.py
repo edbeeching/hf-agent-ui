@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from hf_agent_ui.hub.app import app
 from hf_agent_ui.hub.security import UserIdentity, require_browser_http, require_browser_user, user_from_host_token
 
-DEFAULT_INSTALL_COMMAND = "uv -vv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git"
+DEFAULT_INSTALL_COMMAND = "uv tool install --force --reinstall git+https://github.com/edbeeching/hf-agent-ui.git"
 DEV_INSTALL_COMMAND = f"{DEFAULT_INSTALL_COMMAND}@main"
 PROD_INSTALL_COMMAND = f"{DEFAULT_INSTALL_COMMAND}@prod"
 
