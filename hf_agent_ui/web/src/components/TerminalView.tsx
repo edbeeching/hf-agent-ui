@@ -41,8 +41,10 @@ export function TerminalView({
   const onInputRef = useRef(onInput)
   const onResizeRef = useRef(onResize)
   const pendingPreviewUrlRef = useRef<string | null>(null)
+  const followOutputRef = useRef(true)
   const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
+  const [showScrollButton, setShowScrollButton] = useState(false)
 
   useEffect(() => {
     onInputRef.current = onInput
@@ -103,6 +105,8 @@ export function TerminalView({
     term.loadAddon(webLinksAddon)
     term.open(containerRef.current)
     fitAddon.fit()
+    followOutputRef.current = true
+    setShowScrollButton(false)
 
     // Send keystrokes to the session
     term.onData((data) => {
@@ -122,6 +126,11 @@ export function TerminalView({
     window.addEventListener('resize', handleResize)
     const observer = new ResizeObserver(handleResize)
     observer.observe(containerRef.current)
+    const scrollDisposable = term.onScroll(() => {
+      const atBottom = isTerminalAtBottom(term)
+      followOutputRef.current = atBottom
+      setShowScrollButton(!atBottom)
+    })
 
     termRef.current = term
     fitRef.current = fitAddon
@@ -129,26 +138,48 @@ export function TerminalView({
     return () => {
       window.removeEventListener('resize', handleResize)
       observer.disconnect()
+      scrollDisposable.dispose()
       term.dispose()
       termRef.current = null
       fitRef.current = null
       writtenRef.current = 0
+      followOutputRef.current = true
     }
   }, [sessionId])
 
   // Write new output to terminal
   useEffect(() => {
-    if (!termRef.current) return
+    const term = termRef.current
+    if (!term) return
     const start = writtenRef.current
+    if (start >= output.length) return
+    const shouldFollow = followOutputRef.current || isTerminalAtBottom(term)
     for (let i = start; i < output.length; i++) {
-      termRef.current.write(output[i])
+      const chunk = output[i]
+      if (i === output.length - 1 && shouldFollow) {
+        term.write(chunk, () => {
+          scrollTerminalToBottom(term)
+          followOutputRef.current = true
+          setShowScrollButton(false)
+        })
+      } else {
+        term.write(chunk)
+      }
     }
     writtenRef.current = output.length
+    if (!shouldFollow) {
+      setShowScrollButton(true)
+    }
   }, [output])
 
   useEffect(() => {
     if (!visible || !fitRef.current) return
-    const frame = window.requestAnimationFrame(() => fitRef.current?.fit())
+    const frame = window.requestAnimationFrame(() => {
+      fitRef.current?.fit()
+      if (termRef.current && followOutputRef.current) {
+        scrollTerminalToBottom(termRef.current)
+      }
+    })
     return () => window.cancelAnimationFrame(frame)
   }, [visible, sessionId])
 
@@ -231,6 +262,13 @@ export function TerminalView({
     })
   }
 
+  function handleScrollToBottom(): void {
+    if (!termRef.current) return
+    scrollTerminalToBottom(termRef.current)
+    followOutputRef.current = true
+    setShowScrollButton(false)
+  }
+
   return (
     <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`} onPasteCapture={handlePaste}>
       {needsInput && (
@@ -281,6 +319,17 @@ export function TerminalView({
         </form>
       )}
       <div ref={containerRef} className="terminal-container" />
+      {showScrollButton && (
+        <button
+          type="button"
+          className="terminal-scroll-bottom"
+          onClick={handleScrollToBottom}
+          aria-label="Scroll to latest terminal output"
+          title="Scroll to bottom"
+        >
+          ↓
+        </button>
+      )}
     </div>
   )
 }
@@ -295,6 +344,24 @@ interface PendingScreenshot {
 
 function terminalFontSize(): number {
   return window.matchMedia('(max-width: 760px)').matches ? 12 : 13
+}
+
+function isTerminalAtBottom(term: Terminal): boolean {
+  const buffer = term.buffer.active
+  return buffer.baseY - buffer.viewportY <= 1
+}
+
+function scrollTerminalToBottom(term: Terminal): void {
+  term.scrollToBottom()
+  followTerminalOutput(term)
+}
+
+function followTerminalOutput(term: Terminal): void {
+  const buffer = term.buffer.active
+  if (buffer.baseY - buffer.viewportY <= 1) {
+    return
+  }
+  term.scrollToLine(buffer.baseY)
 }
 
 function openTerminalLink(uri: string): void {

@@ -490,6 +490,28 @@
   background: #0d1117;
 }
 
+.terminal-scroll-bottom {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 18;
+  width: 36px;
+  height: 34px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #e6edf3;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.terminal-scroll-bottom:hover {
+  background: #30363d;
+}
+
 .screenshot-paste-notice {
   position: absolute;
   top: 12px;
