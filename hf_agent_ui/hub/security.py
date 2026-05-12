@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 from urllib.parse import unquote, urlparse
 
 from fastapi import HTTPException, Request, WebSocket, status
@@ -24,6 +25,7 @@ SIGNED_HOST_TOKEN_PREFIX = "hfu"
 SINGLE_USER_SUB = "single-user"
 SINGLE_USER_NAME = "single-user"
 UNSAFE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+USER_HOST_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -174,10 +176,13 @@ def user_host_token(user: UserIdentity) -> str:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Missing required user token signing secret: {USER_TOKEN_SECRET_ENV}",
         )
+    issued_at = int(time.time())
     payload = {
         "kind": "host",
         "sub": user.sub,
         "username": user.username,
+        "iat": issued_at,
+        "exp": issued_at + USER_HOST_TOKEN_TTL_SECONDS,
         "version": 1,
     }
     payload_b64 = _b64encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
@@ -203,6 +208,8 @@ def user_from_host_token(token: str | None) -> UserIdentity | None:
     except (ValueError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict) or payload.get("kind") != "host" or payload.get("version") != 1:
+        return None
+    if not _host_token_time_claims_valid(payload):
         return None
     sub = payload.get("sub")
     username = payload.get("username")
@@ -303,6 +310,26 @@ def _user_token_secret() -> str:
 def _sign_payload(payload_b64: str, secret: str) -> str:
     digest = hmac.new(secret.encode(), payload_b64.encode(), hashlib.sha256).digest()
     return _b64encode(digest)
+
+
+def _host_token_time_claims_valid(payload: dict) -> bool:
+    issued_at = payload.get("iat")
+    expires_at = payload.get("exp")
+    if (
+        isinstance(issued_at, bool)
+        or isinstance(expires_at, bool)
+        or not isinstance(issued_at, int)
+        or not isinstance(expires_at, int)
+    ):
+        return False
+    now = int(time.time())
+    if issued_at > now + 60:
+        return False
+    if expires_at <= now:
+        return False
+    if expires_at < issued_at:
+        return False
+    return True
 
 
 def _b64encode(data: bytes) -> str:
