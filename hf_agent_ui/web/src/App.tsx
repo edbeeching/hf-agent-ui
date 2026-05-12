@@ -41,6 +41,7 @@ function App() {
     daemons,
     sessions,
     ptyOutput,
+    lastError,
     createPtySession,
     sendPtyInput,
     sendSessionImage,
@@ -48,6 +49,7 @@ function App() {
     removeSession,
     listSessions,
     subscribeSession,
+    dismissError,
   } = sw
   const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(() => readStoredSelection())
   const [newSessionDaemonIds, setNewSessionDaemonIds] = useState<string[] | null>(null)
@@ -137,6 +139,14 @@ function App() {
 
   return (
     <div className="app">
+      {lastError && (
+        <div className="app-error-banner" role="alert">
+          <span>{lastError.message}</span>
+          <button type="button" onClick={dismissError} aria-label="Dismiss error">
+            x
+          </button>
+        </div>
+      )}
       <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
           <div>
@@ -231,10 +241,10 @@ function App() {
           getRecentWorkDirs={getRecentWorkDirs}
           onRemoveRecentWorkDir={removeRecentWorkDirForDaemon}
           onClose={() => setNewSessionDaemonIds(null)}
-          onCreate={(daemonId, workDir, tool, launch) => {
+          onCreate={(daemonId, workDir, tool, launch, worktree) => {
             const daemon = newSessionDaemons.find(daemon => daemon.id === daemonId) || null
             setRecentWorkDirs(current => persistRecentWorkDirs(addRecentWorkDir(current, daemon, workDir)))
-            createPtySession(daemonId, workDir, tool, launch)
+            createPtySession(daemonId, workDir, tool, launch, worktree)
             setActiveMobileView('terminal')
           }}
         />

@@ -4,10 +4,13 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from .pty_session import PtySession
+from .worktrees import cleanup_prepared_worktree, prepare_worktree, worktree_metadata_from_record
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +32,34 @@ class SessionManager:
         launch_mode: str = "local",
         launch_command: str | None = None,
         launch_label: str | None = None,
+        worktree: Mapping[str, Any] | None = None,
     ) -> PtySession:
         """Create a PTY session. Call session.start() after subscribing."""
-        session = PtySession(
-            work_dir=work_dir,
-            tool=tool,
-            cols=cols,
-            rows=rows,
-            launch_mode=launch_mode,
-            launch_command=launch_command,
-            launch_label=launch_label,
-        )
+        prepared_worktree = None
+        worktree_metadata = None
+        try:
+            if _worktree_enabled(worktree):
+                prepared_worktree = prepare_worktree(worktree, fallback_source_dir=work_dir)
+                work_dir = prepared_worktree.work_dir
+                worktree_metadata = prepared_worktree.metadata
+
+            session = PtySession(
+                work_dir=work_dir,
+                tool=tool,
+                cols=cols,
+                rows=rows,
+                launch_mode=launch_mode,
+                launch_command=launch_command,
+                launch_label=launch_label,
+                worktree=worktree_metadata,
+            )
+        except Exception:
+            if prepared_worktree:
+                try:
+                    cleanup_prepared_worktree(prepared_worktree.metadata)
+                except Exception:
+                    logger.exception("Failed to clean up worktree after session construction failure")
+            raise
         session.on_event(self._persist_on_event)
         self._sessions[session.id] = session
         logger.info("Created PTY session %s (%s) in %s via %s", session.id, tool, work_dir, launch_mode)
@@ -85,6 +105,15 @@ class SessionManager:
         if not session:
             return False
         session.stop()
+        self._save()
+        return True
+
+    def discard_failed_create(self, session_id: str) -> bool:
+        session = self._sessions.pop(session_id, None)
+        if not session:
+            return False
+        session.stop()
+        self._cleanup_session_worktree(session)
         self._save()
         return True
 
@@ -155,6 +184,7 @@ class SessionManager:
                     launch_mode=record.get("launch_mode", "local"),
                     launch_command=record.get("launch_command"),
                     launch_label=record.get("launch_label"),
+                    worktree=worktree_metadata_from_record(record.get("worktree")),
                 )
                 session.on_event(self._persist_on_event)
                 self._sessions[session.id] = session
@@ -165,9 +195,22 @@ class SessionManager:
         self._save()
 
     @staticmethod
+    def _cleanup_session_worktree(session: AnySession) -> None:
+        if not session.worktree:
+            return
+        try:
+            cleanup_prepared_worktree(session.worktree)
+        except Exception:
+            logger.exception("Failed to clean up worktree for failed session %s", session.id)
+
+    @staticmethod
     def _restore_status(status: object) -> str:
         if status == "stopped":
             return "stopped"
         if status == "error":
             return "error"
         return "paused"
+
+
+def _worktree_enabled(worktree: Mapping[str, Any] | None) -> bool:
+    return isinstance(worktree, Mapping) and worktree.get("enabled") is True

@@ -17,13 +17,15 @@ import shlex
 import struct
 import subprocess
 import sys
-import termios
 import tempfile
+import termios
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Sequence
+
+from .worktrees import WorktreeMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class PtySessionInfo:
     launch_mode: str
     launch_command: str | None
     launch_label: str | None
+    worktree: WorktreeMetadata | None
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ class PtySession:
         launch_mode: str = "local",
         launch_command: str | None = None,
         launch_label: str | None = None,
+        worktree: WorktreeMetadata | None = None,
     ) -> None:
         self.id = session_id or str(uuid.uuid4())
         self.work_dir = str(Path(os.path.expanduser(work_dir)).resolve())
@@ -99,6 +103,7 @@ class PtySession:
         self.launch_mode = _normalize_launch_mode(launch_mode)
         self.launch_command = _normalize_launch_command(self.launch_mode, launch_command)
         self.launch_label = _normalize_launch_label(self.launch_mode, launch_label)
+        self.worktree = worktree
         self.needs_input = False
         self.needs_input_reason: str | None = None
         self.needs_input_kind: str | None = None
@@ -166,15 +171,20 @@ class PtySession:
             hook_file = self._prepare_codex_permission_hook(env)
         args = self._build_args(cmd, resume=resume, prompt=prompt, image_paths=image_paths)
 
-        self._proc = subprocess.Popen(
-            args,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            cwd=self.work_dir,
-            env=env,
-            start_new_session=True,
-        )
+        try:
+            self._proc = subprocess.Popen(
+                args,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=self.work_dir,
+                env=env,
+                start_new_session=True,
+            )
+        except Exception:
+            os.close(slave_fd)
+            os.close(master_fd)
+            raise
         os.close(slave_fd)
         self._master_fd = master_fd
 
@@ -503,6 +513,7 @@ class PtySession:
             launch_mode=self.launch_mode,
             launch_command=self.launch_command,
             launch_label=self.launch_label,
+            worktree=self.worktree,
         )
 
     def get_output_buffer(self) -> list[str]:
@@ -522,6 +533,7 @@ class PtySession:
             "launch_mode": self.launch_mode,
             "launch_command": self.launch_command,
             "launch_label": self.launch_label,
+            "worktree": asdict(self.worktree) if self.worktree else None,
         }
 
     def _append_output(self, text: str) -> None:

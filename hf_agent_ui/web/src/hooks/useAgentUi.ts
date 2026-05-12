@@ -13,6 +13,21 @@ export interface LaunchOptions {
   launchLabel?: string
 }
 
+export interface WorktreeOptions {
+  enabled: true
+  sourceDir: string
+  branch: string
+  startPoint?: string
+}
+
+export interface SessionWorktreeInfo {
+  source_dir: string
+  repo_root: string
+  worktree_root: string
+  branch: string
+  start_point: string
+}
+
 export interface SessionImagePayload {
   filename: string
   mimeType: string
@@ -46,15 +61,23 @@ export interface SessionInfo {
   launch_mode: LaunchMode
   launch_command: string | null
   launch_label: string | null
+  worktree: SessionWorktreeInfo | null
 }
 
 export type InputRequiredKind = 'permission' | 'confirmation' | 'auth' | 'prompt'
+
+export interface AgentUiError {
+  message: string
+  requestType: string | null
+  daemonId: string | null
+}
 
 interface AgentUiState {
   connected: boolean
   daemons: Daemon[]
   sessions: Map<string, SessionInfo[]>
   ptyOutput: Map<string, string[]>  // sessionId -> raw terminal output chunks
+  lastError: AgentUiError | null
 }
 
 interface ServerMessage {
@@ -71,6 +94,7 @@ interface ServerMessage {
   message?: string
   detectedAt?: string
   status?: string
+  requestType?: string
 }
 
 interface InputRequiredUpdate {
@@ -89,6 +113,7 @@ export function useAgentUi(enabled = true) {
     daemons: [],
     sessions: new Map(),
     ptyOutput: new Map(),
+    lastError: null,
   })
 
   const fetchDaemons = useCallback(async () => {
@@ -276,6 +301,25 @@ export function useAgentUi(enabled = true) {
         })
         break
       }
+
+      case 'error': {
+        const requestType = typeof msg.requestType === 'string' ? msg.requestType : null
+        const rawMessage = typeof msg.message === 'string' && msg.message.trim()
+          ? msg.message.trim()
+          : 'Unknown error'
+        const message = requestType === 'pty.create'
+          ? `Could not create session: ${rawMessage}`
+          : rawMessage
+        setState(s => ({
+          ...s,
+          lastError: {
+            message,
+            requestType,
+            daemonId: typeof daemonId === 'string' ? daemonId : null,
+          },
+        }))
+        break
+      }
     }
   }, [updateSessionInputRequired, updateSessionStatus])
 
@@ -344,9 +388,11 @@ export function useAgentUi(enabled = true) {
     workDir: string,
     tool: string = 'codex',
     launch: LaunchOptions = { launchMode: 'local' },
+    worktree?: WorktreeOptions,
     cols: number = 120,
     rows: number = 40,
   ) => {
+    setState(s => ({ ...s, lastError: null }))
     send({
       type: 'pty.create',
       daemonId,
@@ -357,6 +403,7 @@ export function useAgentUi(enabled = true) {
       launchMode: launch.launchMode,
       launchCommand: launch.launchCommand,
       launchLabel: launch.launchLabel,
+      worktree,
     })
   }, [send])
 
@@ -428,6 +475,10 @@ export function useAgentUi(enabled = true) {
     send({ type: 'session.subscribe', daemonId, sessionId })
   }, [send])
 
+  const dismissError = useCallback(() => {
+    setState(s => ({ ...s, lastError: null }))
+  }, [])
+
   return {
     ...state,
     createPtySession,
@@ -443,6 +494,7 @@ export function useAgentUi(enabled = true) {
     listSessions,
     subscribeSession,
     fetchDaemons,
+    dismissError,
   }
 }
 
@@ -460,6 +512,7 @@ function normalizeSession(session: SessionInfo): SessionInfo {
     launch_mode: session.launch_mode === 'custom' ? 'custom' : 'local',
     launch_command: typeof session.launch_command === 'string' ? session.launch_command : null,
     launch_label: typeof session.launch_label === 'string' ? session.launch_label : null,
+    worktree: normalizeWorktree(session.worktree),
   }
 }
 
@@ -475,4 +528,24 @@ function normalizeInputRequiredKind(kind: unknown): InputRequiredKind | null {
     return kind
   }
   return null
+}
+
+function normalizeWorktree(worktree: unknown): SessionWorktreeInfo | null {
+  if (!worktree || typeof worktree !== 'object') return null
+  const candidate = worktree as Record<string, unknown>
+  if (
+    typeof candidate.source_dir !== 'string'
+    || typeof candidate.repo_root !== 'string'
+    || typeof candidate.worktree_root !== 'string'
+    || typeof candidate.branch !== 'string'
+  ) {
+    return null
+  }
+  return {
+    source_dir: candidate.source_dir,
+    repo_root: candidate.repo_root,
+    worktree_root: candidate.worktree_root,
+    branch: candidate.branch,
+    start_point: typeof candidate.start_point === 'string' ? candidate.start_point : 'HEAD',
+  }
 }

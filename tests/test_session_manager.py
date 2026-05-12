@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from hf_agent_ui.daemon.session_manager import SessionManager
 
@@ -84,6 +87,54 @@ def test_session_manager_persists_custom_launch_metadata(tmp_path: Path) -> None
     assert restored_info["launch_label"] == "gpu"
 
 
+def test_session_manager_creates_worktree_session(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    session = manager.create_pty(
+        str(source_dir),
+        tool="bash",
+        worktree={
+            "enabled": True,
+            "sourceDir": str(source_dir),
+            "branch": "agent/test-session",
+            "startPoint": "HEAD",
+        },
+    )
+
+    assert session.work_dir == str(repo / ".worktrees" / "agent-test-session" / "app")
+    assert Path(session.work_dir).is_dir()
+    assert session.worktree is not None
+    assert session.worktree.branch == "agent/test-session"
+    assert _git(repo, "show-ref", "--verify", "--quiet", "refs/heads/agent/test-session").returncode == 0
+
+
+def test_session_manager_cleans_up_worktree_when_session_construction_fails(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    with pytest.raises(ValueError, match="Unknown launch mode"):
+        manager.create_pty(
+            str(source_dir),
+            tool="bash",
+            launch_mode="invalid",
+            worktree={
+                "enabled": True,
+                "sourceDir": str(source_dir),
+                "branch": "agent/fails-before-start",
+                "startPoint": "HEAD",
+            },
+        )
+
+    assert not (repo / ".worktrees" / "agent-fails-before-start").exists()
+    assert _git(repo, "show-ref", "--verify", "--quiet", "refs/heads/agent/fails-before-start").returncode == 1
+    assert manager.list() == []
+
+
 def test_session_manager_save_uses_unique_temp_file(monkeypatch, tmp_path: Path) -> None:
     state_path = tmp_path / "sessions.json"
     fixed_tmp_path = state_path.with_suffix(".tmp")
@@ -102,3 +153,25 @@ def test_session_manager_save_uses_unique_temp_file(monkeypatch, tmp_path: Path)
     assert state_path.exists()
     assert not fixed_tmp_path.exists()
     assert list(tmp_path.glob(".sessions.json.*.tmp")) == []
+
+
+def _init_git_repo(path: Path) -> Path:
+    source_dir = path / "app"
+    source_dir.mkdir(parents=True)
+    (source_dir / "README.md").write_text("hello\n", encoding="utf-8")
+    _git(path, "init", check=True)
+    _git(path, "config", "user.email", "test@example.com", check=True)
+    _git(path, "config", "user.name", "Test User", check=True)
+    _git(path, "add", ".", check=True)
+    _git(path, "commit", "-m", "initial", check=True)
+    return path
+
+
+def _git(repo: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=check,
+        capture_output=True,
+        text=True,
+    )
