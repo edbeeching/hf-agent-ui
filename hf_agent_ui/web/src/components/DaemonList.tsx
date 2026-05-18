@@ -132,7 +132,7 @@ export function DaemonList({
             disabled={!contextSession}
             onClick={() => {
               if (!contextSession) return
-              const nextLabel = window.prompt('Session name', contextSession.label || projectNameFromPath(contextSession.work_dir))
+              const nextLabel = window.prompt('Session name', contextSession.label || projectNameForSession(contextSession))
               if (nextLabel === null) return
               onRenameSession(contextMenu.daemonId, contextMenu.sessionId, nextLabel.trim() || null)
               setContextMenu(null)
@@ -307,7 +307,7 @@ function groupDaemons(daemons: Daemon[], sessions: Map<string, SessionInfo[]>): 
     }
 
     for (const session of daemonSessions) {
-      addSessionToProject(groups.get(environment)!, projectNameFromPath(session.work_dir), daemon, session)
+      addSessionToProject(groups.get(environment)!, projectNameForSession(session), daemon, session)
     }
   }
 
@@ -368,6 +368,10 @@ function projectNameFromPath(path: string): string {
   if (!trimmed || trimmed === '~') return 'Home'
   const parts = trimmed.split(/[\\/]+/)
   return parts[parts.length - 1] || trimmed
+}
+
+function projectNameForSession(session: SessionInfo): string {
+  return projectNameFromPath(session.worktree?.source_dir || session.work_dir)
 }
 
 function countProjectSessions(project: ProjectGroup): number {
