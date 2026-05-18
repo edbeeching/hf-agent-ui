@@ -87,6 +87,21 @@ def test_session_manager_persists_custom_launch_metadata(tmp_path: Path) -> None
     assert restored_info["launch_label"] == "gpu"
 
 
+def test_session_manager_persists_label_and_seen_metadata(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    session = manager.create_pty(str(tmp_path), tool="bash")
+    assert manager.rename(session.id, "Review server logs")
+    assert manager.mark_seen(session.id)
+
+    restored = SessionManager(state_path)
+    restored_info = restored.list()[0]
+    assert restored_info["label"] == "Review server logs"
+    assert restored_info["last_seen_at"] is not None
+    assert restored_info["agent_state"] == "idle"
+
+
 def test_session_manager_creates_worktree_session(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path / "repo")
     source_dir = repo / "app"

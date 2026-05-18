@@ -33,6 +33,7 @@ class SessionManager:
         launch_command: str | None = None,
         launch_label: str | None = None,
         worktree: Mapping[str, Any] | None = None,
+        label: str | None = None,
     ) -> PtySession:
         """Create a PTY session. Call session.start() after subscribing."""
         prepared_worktree = None
@@ -52,6 +53,7 @@ class SessionManager:
                 launch_command=launch_command,
                 launch_label=launch_label,
                 worktree=worktree_metadata,
+                label=label,
             )
         except Exception:
             if prepared_worktree:
@@ -97,6 +99,22 @@ class SessionManager:
         if not session:
             return False
         await session.resume()
+        self._save()
+        return True
+
+    def rename(self, session_id: str, label: str | None) -> bool:
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        session.rename(label)
+        self._save()
+        return True
+
+    def mark_seen(self, session_id: str) -> bool:
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        session.mark_seen()
         self._save()
         return True
 
@@ -185,6 +203,10 @@ class SessionManager:
                     launch_command=record.get("launch_command"),
                     launch_label=record.get("launch_label"),
                     worktree=worktree_metadata_from_record(record.get("worktree")),
+                    label=record.get("label"),
+                    last_activity_at=record.get("last_activity_at"),
+                    last_seen_at=record.get("last_seen_at"),
+                    done_since=record.get("done_since"),
                 )
                 session.on_event(self._persist_on_event)
                 self._sessions[session.id] = session

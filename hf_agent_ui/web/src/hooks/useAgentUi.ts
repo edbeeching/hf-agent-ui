@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ensureUiTokenCookie, initializeUiTokenFromUrl, uiAuthFetch, uiWebSocketUrl } from '../auth'
 
 type JsonObject = Record<string, unknown>
+const AGENT_WORKING_WINDOW_MS = 20_000
 
 initializeUiTokenFromUrl()
 
@@ -28,6 +29,17 @@ export interface SessionWorktreeInfo {
   start_point: string
 }
 
+export type AgentState = 'blocked' | 'working' | 'done' | 'idle' | 'unknown'
+
+export interface SessionGitInfo {
+  branch: string | null
+  dirty: boolean
+  ahead: number | null
+  behind: number | null
+  is_worktree: boolean
+  repo_root: string
+}
+
 export interface SessionImagePayload {
   filename: string
   mimeType: string
@@ -51,6 +63,11 @@ export interface SessionInfo {
   tool: string
   mode: 'pty'
   created_at: string
+  label: string | null
+  agent_state: AgentState
+  last_activity_at: string | null
+  last_seen_at: string | null
+  done_since: string | null
   needs_input: boolean
   needs_input_reason: string | null
   needs_input_kind: InputRequiredKind | null
@@ -62,6 +79,7 @@ export interface SessionInfo {
   launch_command: string | null
   launch_label: string | null
   worktree: SessionWorktreeInfo | null
+  git: SessionGitInfo | null
 }
 
 export type InputRequiredKind = 'permission' | 'confirmation' | 'auth' | 'prompt'
@@ -138,12 +156,7 @@ export function useAgentUi(enabled = true) {
 
   const updateSessionStatus = useCallback((sessionId: string, status: string) => {
     setState(s => {
-      const sessions = new Map(s.sessions)
-      for (const [did, list] of sessions) {
-        sessions.set(did, list.map(sess =>
-          sess.id === sessionId ? { ...sess, status } : sess
-        ))
-      }
+      const sessions = updateSession(s.sessions, sessionId, session => refreshAgentState({ ...session, status }))
       return { ...s, sessions }
     })
   }, [])
@@ -160,6 +173,7 @@ export function useAgentUi(enabled = true) {
           sess.id === sessionId
             ? {
               ...sess,
+              agent_state: needsInput ? 'blocked' : refreshAgentState({ ...sess, needs_input: false }).agent_state,
               needs_input: needsInput,
               needs_input_reason: needsInput ? update.reason || 'Human input required' : null,
               needs_input_kind: needsInput ? normalizeInputRequiredKind(update.kind) : null,
@@ -222,11 +236,18 @@ export function useAgentUi(enabled = true) {
 
       case 'pty.output': {
         if (!sessionId || typeof msg.data !== 'string') return
+        const activityAt = new Date().toISOString()
         setState(s => {
           const ptyOutput = new Map(s.ptyOutput)
           const chunks = ptyOutput.get(sessionId) || []
           ptyOutput.set(sessionId, [...chunks, msg.data as string])
-          return { ...s, ptyOutput }
+          const sessions = updateSession(s.sessions, sessionId, session => ({
+            ...session,
+            agent_state: session.needs_input ? 'blocked' : 'working',
+            last_activity_at: activityAt,
+            done_since: null,
+          }))
+          return { ...s, sessions, ptyOutput }
         })
         break
       }
@@ -244,7 +265,9 @@ export function useAgentUi(enabled = true) {
       }
 
       case 'session.paused':
-      case 'session.resumed': {
+      case 'session.resumed':
+      case 'session.renamed':
+      case 'session.updated': {
         if (!daemonId || !sessionId || !msg.session) return
         const session = normalizeSession(msg.session)
         setState(s => {
@@ -322,6 +345,14 @@ export function useAgentUi(enabled = true) {
       }
     }
   }, [updateSessionInputRequired, updateSessionStatus])
+
+  useEffect(() => {
+    if (!enabled) return
+    const interval = setInterval(() => {
+      setState(s => ({ ...s, sessions: refreshAgentStates(s.sessions) }))
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [enabled])
 
   useEffect(() => {
     if (!enabled) {
@@ -459,6 +490,23 @@ export function useAgentUi(enabled = true) {
     send({ type: 'session.resume', daemonId, sessionId })
   }, [send])
 
+  const renameSession = useCallback((daemonId: string, sessionId: string, label: string | null) => {
+    send({ type: 'session.rename', daemonId, sessionId, label })
+  }, [send])
+
+  const markSessionSeen = useCallback((daemonId: string, sessionId: string) => {
+    const seenAt = new Date().toISOString()
+    setState(s => ({
+      ...s,
+      sessions: updateSession(s.sessions, sessionId, session => normalizeSeenSession({
+        ...session,
+        last_seen_at: seenAt,
+        done_since: null,
+      })),
+    }))
+    send({ type: 'session.mark_seen', daemonId, sessionId })
+  }, [send])
+
   const pauseDaemon = useCallback((daemonId: string) => {
     send({ type: 'app.pause', daemonId })
   }, [send])
@@ -489,6 +537,8 @@ export function useAgentUi(enabled = true) {
     removeSession,
     pauseSession,
     resumeSession,
+    renameSession,
+    markSessionSeen,
     pauseDaemon,
     resumeDaemon,
     listSessions,
@@ -502,6 +552,11 @@ function normalizeSession(session: SessionInfo): SessionInfo {
   return {
     ...session,
     mode: 'pty',
+    label: typeof session.label === 'string' && session.label.trim() ? session.label.trim() : null,
+    agent_state: normalizeAgentState(session.agent_state, session),
+    last_activity_at: normalizeTimestamp(session.last_activity_at),
+    last_seen_at: normalizeTimestamp(session.last_seen_at),
+    done_since: normalizeTimestamp(session.done_since),
     needs_input: Boolean(session.needs_input),
     needs_input_reason: session.needs_input_reason || null,
     needs_input_kind: normalizeInputRequiredKind(session.needs_input_kind),
@@ -513,6 +568,7 @@ function normalizeSession(session: SessionInfo): SessionInfo {
     launch_command: typeof session.launch_command === 'string' ? session.launch_command : null,
     launch_label: typeof session.launch_label === 'string' ? session.launch_label : null,
     worktree: normalizeWorktree(session.worktree),
+    git: normalizeGit(session.git),
   }
 }
 
@@ -528,6 +584,22 @@ function normalizeInputRequiredKind(kind: unknown): InputRequiredKind | null {
     return kind
   }
   return null
+}
+
+function normalizeAgentState(state: unknown, session: Partial<SessionInfo>): AgentState {
+  if (session.needs_input) return 'blocked'
+  if (state === 'blocked' || state === 'working' || state === 'done' || state === 'idle' || state === 'unknown') {
+    return state
+  }
+  if (session.status === 'running') return 'idle'
+  return 'unknown'
+}
+
+function normalizeTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const time = Date.parse(value)
+  if (Number.isNaN(time)) return null
+  return new Date(time).toISOString()
 }
 
 function normalizeWorktree(worktree: unknown): SessionWorktreeInfo | null {
@@ -548,4 +620,82 @@ function normalizeWorktree(worktree: unknown): SessionWorktreeInfo | null {
     branch: candidate.branch,
     start_point: typeof candidate.start_point === 'string' ? candidate.start_point : 'HEAD',
   }
+}
+
+function normalizeGit(git: unknown): SessionGitInfo | null {
+  if (!git || typeof git !== 'object') return null
+  const candidate = git as Record<string, unknown>
+  if (typeof candidate.repo_root !== 'string') return null
+  return {
+    branch: typeof candidate.branch === 'string' && candidate.branch ? candidate.branch : null,
+    dirty: Boolean(candidate.dirty),
+    ahead: typeof candidate.ahead === 'number' ? candidate.ahead : null,
+    behind: typeof candidate.behind === 'number' ? candidate.behind : null,
+    is_worktree: Boolean(candidate.is_worktree),
+    repo_root: candidate.repo_root,
+  }
+}
+
+function updateSession(
+  sessions: Map<string, SessionInfo[]>,
+  sessionId: string,
+  updater: (session: SessionInfo) => SessionInfo,
+): Map<string, SessionInfo[]> {
+  const next = new Map(sessions)
+  for (const [daemonId, list] of next) {
+    next.set(daemonId, list.map(session => session.id === sessionId ? updater(session) : session))
+  }
+  return next
+}
+
+function refreshAgentStates(sessions: Map<string, SessionInfo[]>): Map<string, SessionInfo[]> {
+  let changed = false
+  const next = new Map<string, SessionInfo[]>()
+  for (const [daemonId, list] of sessions) {
+    const updated = list.map(session => {
+      const refreshed = refreshAgentState(session)
+      changed = changed || refreshed !== session
+      return refreshed
+    })
+    next.set(daemonId, updated)
+  }
+  return changed ? next : sessions
+}
+
+function refreshAgentState(session: SessionInfo): SessionInfo {
+  if (session.needs_input) {
+    return session.agent_state === 'blocked' ? session : { ...session, agent_state: 'blocked' }
+  }
+  const activityTime = session.last_activity_at ? Date.parse(session.last_activity_at) : NaN
+  if (Number.isNaN(activityTime)) {
+    const idleState: AgentState = session.status === 'running' || session.status === 'paused' || session.status === 'stopped'
+      ? 'idle'
+      : 'unknown'
+    return session.agent_state === idleState ? session : { ...session, agent_state: idleState }
+  }
+  const seenTime = session.last_seen_at ? Date.parse(session.last_seen_at) : NaN
+  const unseen = Number.isNaN(seenTime) || seenTime < activityTime
+  const recent = Date.now() - activityTime <= AGENT_WORKING_WINDOW_MS
+  let agentState: AgentState = 'idle'
+  let doneSince = session.done_since
+  if (session.status === 'running' && recent) {
+    agentState = 'working'
+    doneSince = null
+  } else if (unseen) {
+    agentState = 'done'
+    doneSince = doneSince || session.last_activity_at
+  }
+  if (session.agent_state === agentState && session.done_since === doneSince) return session
+  return { ...session, agent_state: agentState, done_since: doneSince }
+}
+
+function normalizeSeenSession(session: SessionInfo): SessionInfo {
+  if (session.needs_input) return { ...session, agent_state: 'blocked' }
+  if (session.status === 'running' && session.last_activity_at) {
+    const activityTime = Date.parse(session.last_activity_at)
+    if (!Number.isNaN(activityTime) && Date.now() - activityTime <= AGENT_WORKING_WINDOW_MS) {
+      return { ...session, agent_state: 'working', done_since: null }
+    }
+  }
+  return { ...session, agent_state: session.status === 'running' || session.status === 'paused' || session.status === 'stopped' ? 'idle' : 'unknown', done_since: null }
 }

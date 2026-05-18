@@ -31,6 +31,8 @@ class DaemonWsServer:
       { type: "session.stop", sessionId }
       { type: "session.pause", sessionId }
       { type: "session.resume", sessionId }
+      { type: "session.rename", sessionId, label? }
+      { type: "session.mark_seen", sessionId }
       { type: "app.pause" }
       { type: "app.resume" }
       { type: "session.remove", sessionId }
@@ -45,6 +47,8 @@ class DaemonWsServer:
       { type: "session.input_required", sessionId, reason, source, kind?, title?, message?, detectedAt? }
       { type: "session.input_resolved", sessionId }
       { type: "session.subscribed", session }
+      { type: "session.renamed", sessionId, session }
+      { type: "session.updated", sessionId, session }
       { type: "session.list", sessions: [...] }
       { type: "error", message, requestType? }
     """
@@ -112,6 +116,7 @@ class DaemonWsServer:
                         launch_command=req.get("launchCommand"),
                         launch_label=req.get("launchLabel"),
                         worktree=worktree,
+                        label=req.get("label") if isinstance(req.get("label"), str) else None,
                     )
                     self._subscribe_any(ws, session)
                     await session.start()
@@ -199,6 +204,7 @@ class DaemonWsServer:
                         "requestType": msg_type,
                     })
                     return
+                self.manager.mark_seen(session.id)
                 self._subscribe_any(ws, session)
                 payload: dict[str, Any] = {
                     "type": "session.subscribed",
@@ -249,8 +255,48 @@ class DaemonWsServer:
                 session = self.manager.get(session_id)
                 if session:
                     self._subscribe_any(ws, session)
+                    await self._send(ws, {
+                        "type": "session.resumed",
+                        "sessionId": session_id,
+                        "session": _session_payload(session),
+                    })
+
+            case "session.rename":
+                session_id = req.get("sessionId", "")
+                label = req.get("label")
+                if label is not None and not isinstance(label, str):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": "Session label must be a string",
+                        "requestType": msg_type,
+                    })
+                    return
+                if not self.manager.rename(session_id, label):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"Session not found: {session_id}",
+                        "requestType": msg_type,
+                    })
+                    return
+                session = self.manager.get(session_id)
                 await self._send(ws, {
-                    "type": "session.resumed",
+                    "type": "session.renamed",
+                    "sessionId": session_id,
+                    "session": _session_payload(session),
+                })
+
+            case "session.mark_seen":
+                session_id = req.get("sessionId", "")
+                if not self.manager.mark_seen(session_id):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"Session not found: {session_id}",
+                        "requestType": msg_type,
+                    })
+                    return
+                session = self.manager.get(session_id)
+                await self._send(ws, {
+                    "type": "session.updated",
                     "sessionId": session_id,
                     "session": _session_payload(session),
                 })

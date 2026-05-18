@@ -23,8 +23,10 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 from typing import Any, Callable, Coroutine, Sequence
 
+from .git_status import GitStatusInfo, git_status_for_path
 from .worktrees import WorktreeMetadata
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,8 @@ logger = logging.getLogger(__name__)
 EventCallback = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 MAX_OUTPUT_BUFFER_BYTES = 1_000_000
+AGENT_WORKING_WINDOW_SECONDS = 20.0
+GIT_STATUS_REFRESH_SECONDS = 15.0
 TUI_PAUSE_EXIT_COMMAND = "/exit\r"
 BASH_PAUSE_EXIT_COMMAND = "exit\r"
 PAUSE_EXIT_GRACE_SECONDS = 5.0
@@ -52,6 +56,11 @@ class PtySessionInfo:
     tool: str
     mode: str
     created_at: str
+    label: str | None
+    agent_state: str
+    last_activity_at: str | None
+    last_seen_at: str | None
+    done_since: str | None
     needs_input: bool
     needs_input_reason: str | None
     needs_input_kind: str | None
@@ -63,6 +72,7 @@ class PtySessionInfo:
     launch_command: str | None
     launch_label: str | None
     worktree: WorktreeMetadata | None
+    git: GitStatusInfo | None
 
 
 @dataclass(frozen=True)
@@ -91,6 +101,10 @@ class PtySession:
         launch_command: str | None = None,
         launch_label: str | None = None,
         worktree: WorktreeMetadata | None = None,
+        label: str | None = None,
+        last_activity_at: str | None = None,
+        last_seen_at: str | None = None,
+        done_since: str | None = None,
     ) -> None:
         self.id = session_id or str(uuid.uuid4())
         self.work_dir = str(Path(os.path.expanduser(work_dir)).resolve())
@@ -99,6 +113,10 @@ class PtySession:
         self.rows = rows
         self.status = status
         self.created_at = created_at or datetime.now(timezone.utc).isoformat()
+        self.label = _normalize_label(label)
+        self.last_activity_at = _normalize_timestamp(last_activity_at)
+        self.last_seen_at = _normalize_timestamp(last_seen_at)
+        self.done_since = _normalize_timestamp(done_since)
         self.resume_token = resume_token
         self.launch_mode = _normalize_launch_mode(launch_mode)
         self.launch_command = _normalize_launch_command(self.launch_mode, launch_command)
@@ -122,6 +140,8 @@ class PtySession:
         self._output_buffer_bytes = 0
         self._exit_status = "stopped"
         self._codex_hook_enabled = False
+        self._cached_git_status: GitStatusInfo | None = None
+        self._git_status_checked_at = 0.0
 
     def on_event(self, cb: EventCallback) -> None:
         self._callbacks.append(cb)
@@ -193,6 +213,7 @@ class PtySession:
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
         self.status = "running"
+        self._git_status_checked_at = 0.0
         if self._pause_fallback_task:
             self._pause_fallback_task.cancel()
             self._pause_fallback_task = None
@@ -276,6 +297,7 @@ class PtySession:
                     )
                     if data:
                         text = data.decode("utf-8", errors="replace")
+                        self._mark_activity()
                         self._append_output(text)
                         await self._emit({
                             "type": "pty.output",
@@ -303,6 +325,7 @@ class PtySession:
                 self._pause_fallback_task = None
             logger.info("PTY process exited with code %s", code)
             await self._mark_input_resolved()
+            self._refresh_attention_state()
             await self._emit({
                 "type": "pty.exit",
                 "sessionId": self.id,
@@ -347,8 +370,10 @@ class PtySession:
         """Write input (keystrokes) to the PTY."""
         if self._master_fd is not None and self.status == "running":
             os.write(self._master_fd, data.encode("utf-8"))
-            if data and self.needs_input:
-                self._schedule_input_resolved()
+            if data:
+                self.mark_seen()
+                if self.needs_input:
+                    self._schedule_input_resolved()
 
     async def send_image_to_codex(self, *, image_path: str | Path, prompt: str) -> None:
         if self.tool != "codex":
@@ -366,6 +391,7 @@ class PtySession:
             fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
 
     def stop(self) -> None:
+        self.mark_seen()
         if self._pause_fallback_task:
             self._pause_fallback_task.cancel()
             self._pause_fallback_task = None
@@ -378,6 +404,7 @@ class PtySession:
         self._close_master_fd()
 
     def pause(self) -> None:
+        self.mark_seen()
         if self.tool == "codex" and not self.resume_token:
             self.resume_token = self._latest_codex_session_id()
         if self._proc and self.status == "running":
@@ -457,6 +484,7 @@ class PtySession:
             await asyncio.to_thread(self._proc.wait)
 
     async def _restart_for_codex_image(self, *, prompt: str, image_path: str) -> None:
+        self.mark_seen()
         if self.status == "running" and self.tool == "codex" and not self.resume_token:
             self.resume_token = self._latest_codex_session_id()
         if self._proc and self._proc.poll() is None:
@@ -496,6 +524,7 @@ class PtySession:
                 await asyncio.to_thread(proc.wait)
 
     def to_info(self) -> PtySessionInfo:
+        self._refresh_attention_state()
         return PtySessionInfo(
             id=self.id,
             status=self.status,
@@ -503,6 +532,11 @@ class PtySession:
             tool=self.tool,
             mode="pty",
             created_at=self.created_at,
+            label=self.label,
+            agent_state=self._agent_state(),
+            last_activity_at=self.last_activity_at,
+            last_seen_at=self.last_seen_at,
+            done_since=self.done_since,
             needs_input=self.needs_input,
             needs_input_reason=self.needs_input_reason,
             needs_input_kind=self.needs_input_kind,
@@ -514,6 +548,7 @@ class PtySession:
             launch_command=self.launch_command,
             launch_label=self.launch_label,
             worktree=self.worktree,
+            git=self.git_status(),
         )
 
     def get_output_buffer(self) -> list[str]:
@@ -527,6 +562,7 @@ class PtySession:
             "created_at": self.created_at,
             "work_dir": self.work_dir,
             "tool": self.tool,
+            "label": self.label,
             "cols": self.cols,
             "rows": self.rows,
             "resume_token": self.resume_token,
@@ -534,7 +570,25 @@ class PtySession:
             "launch_command": self.launch_command,
             "launch_label": self.launch_label,
             "worktree": asdict(self.worktree) if self.worktree else None,
+            "last_activity_at": self.last_activity_at,
+            "last_seen_at": self.last_seen_at,
+            "done_since": self.done_since,
         }
+
+    def rename(self, label: str | None) -> None:
+        self.label = _normalize_label(label)
+
+    def mark_seen(self) -> None:
+        self.last_seen_at = datetime.now(timezone.utc).isoformat()
+        self.done_since = None
+
+    def git_status(self, *, force: bool = False) -> GitStatusInfo | None:
+        now = monotonic()
+        if not force and now - self._git_status_checked_at < GIT_STATUS_REFRESH_SECONDS:
+            return self._cached_git_status
+        self._cached_git_status = git_status_for_path(self.work_dir)
+        self._git_status_checked_at = now
+        return self._cached_git_status
 
     def _append_output(self, text: str) -> None:
         size = len(text.encode("utf-8", errors="replace"))
@@ -543,6 +597,45 @@ class PtySession:
         while self._output_buffer_bytes > MAX_OUTPUT_BUFFER_BYTES and self._output_buffer:
             removed = self._output_buffer.pop(0)
             self._output_buffer_bytes -= len(removed.encode("utf-8", errors="replace"))
+
+    def _mark_activity(self) -> None:
+        self.last_activity_at = datetime.now(timezone.utc).isoformat()
+        self.done_since = None
+
+    def _agent_state(self) -> str:
+        if self.needs_input:
+            return "blocked"
+        if self.done_since:
+            return "done"
+        if self.status == "running" and self._has_recent_activity():
+            return "working"
+        if self.status in {"running", "paused", "stopped"}:
+            return "idle"
+        return "unknown"
+
+    def _refresh_attention_state(self) -> None:
+        if self.needs_input:
+            return
+        if not self._has_unseen_activity():
+            self.done_since = None
+            return
+        if self.status == "running" and self._has_recent_activity():
+            self.done_since = None
+            return
+        self.done_since = self.done_since or self.last_activity_at
+
+    def _has_recent_activity(self) -> bool:
+        activity = _parse_timestamp(self.last_activity_at)
+        if not activity:
+            return False
+        return (datetime.now(timezone.utc) - activity).total_seconds() <= AGENT_WORKING_WINDOW_SECONDS
+
+    def _has_unseen_activity(self) -> bool:
+        activity = _parse_timestamp(self.last_activity_at)
+        if not activity:
+            return False
+        seen = _parse_timestamp(self.last_seen_at)
+        return seen is None or seen < activity
 
     async def _mark_input_required(self, signal: InputRequiredSignal, source: str) -> None:
         reason = signal.reason.strip() or "Human input required"
@@ -926,3 +1019,27 @@ def _normalize_launch_label(launch_mode: str, value: object) -> str | None:
         return None
     label = value.strip() if isinstance(value, str) else ""
     return label or "custom"
+
+
+def _normalize_label(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    label = value.strip()
+    return label[:120] or None
+
+
+def _normalize_timestamp(value: object) -> str | None:
+    parsed = _parse_timestamp(value)
+    return parsed.isoformat() if parsed else None
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)

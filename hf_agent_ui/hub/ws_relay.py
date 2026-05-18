@@ -26,6 +26,8 @@ class WsRelay:
       -> { type: "pty.resize", daemonId, sessionId, cols, rows }
       -> { type: "session.image.send", daemonId, sessionId, filename, mimeType, dataBase64, prompt }
       -> { type: "session.stop", daemonId, sessionId }
+      -> { type: "session.rename", daemonId, sessionId, label? }
+      -> { type: "session.mark_seen", daemonId, sessionId }
       -> { type: "session.list", daemonId }
       -> { type: "session.subscribe", daemonId, sessionId }
 
@@ -36,6 +38,8 @@ class WsRelay:
       <- { type: "session.input_required", daemonId, sessionId, reason, source, kind?, title?, message?, detectedAt? }
       <- { type: "session.input_resolved", daemonId, sessionId }
       <- { type: "session.subscribed", daemonId, session }
+      <- { type: "session.renamed", daemonId, sessionId, session }
+      <- { type: "session.updated", daemonId, sessionId, session }
       <- { type: "session.list", daemonId, sessions }
       <- { type: "error", message }
     """
@@ -133,6 +137,12 @@ class WsRelay:
                 self._session_subscribers[(daemon_id, session_id)].add(ws)
             return
 
+        if msg_type in {"session.rename", "session.mark_seen"}:
+            self._pending_requests[(daemon_id, msg_type)].append(ws)
+            if isinstance(session_id, str) and session_id:
+                self._session_subscribers[(daemon_id, session_id)].add(ws)
+            return
+
         if isinstance(session_id, str) and session_id:
             self._session_subscribers[(daemon_id, session_id)].add(ws)
 
@@ -166,6 +176,20 @@ class WsRelay:
         if msg_type == "session.image.sent":
             targets = set(self._session_subscribers.get((daemon_id, session_id), set())) if session_id else set()
             target = self._pop_pending(daemon_id, "session.image.send")
+            if target:
+                targets.add(target)
+            return targets
+
+        if msg_type == "session.renamed":
+            targets = set(self._session_subscribers.get((daemon_id, session_id), set())) if session_id else set()
+            target = self._pop_pending(daemon_id, "session.rename")
+            if target:
+                targets.add(target)
+            return targets
+
+        if msg_type == "session.updated":
+            targets = set(self._session_subscribers.get((daemon_id, session_id), set())) if session_id else set()
+            target = self._pop_pending(daemon_id, "session.mark_seen")
             if target:
                 targets.add(target)
             return targets
