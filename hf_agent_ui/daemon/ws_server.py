@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from typing import Any
 
 import websockets
@@ -23,13 +24,15 @@ class DaemonWsServer:
     Protocol (client = hub, server = daemon):
 
     Client -> Server:
-      { type: "pty.create", workDir, tool?, cols?, rows?, launchMode?, launchCommand?, launchLabel? }
+      { type: "pty.create", workDir, tool?, cols?, rows?, launchMode?, launchCommand?, launchLabel?, worktree? }
       { type: "pty.input", sessionId, data }
       { type: "pty.resize", sessionId, cols, rows }
       { type: "session.image.send", sessionId, filename, mimeType, dataBase64, prompt }
       { type: "session.stop", sessionId }
       { type: "session.pause", sessionId }
       { type: "session.resume", sessionId }
+      { type: "session.rename", sessionId, label? }
+      { type: "session.mark_seen", sessionId }
       { type: "app.pause" }
       { type: "app.resume" }
       { type: "session.remove", sessionId }
@@ -44,6 +47,8 @@ class DaemonWsServer:
       { type: "session.input_required", sessionId, reason, source, kind?, title?, message?, detectedAt? }
       { type: "session.input_resolved", sessionId }
       { type: "session.subscribed", session }
+      { type: "session.renamed", sessionId, session }
+      { type: "session.updated", sessionId, session }
       { type: "session.list", sessions: [...] }
       { type: "error", message, requestType? }
     """
@@ -99,6 +104,9 @@ class DaemonWsServer:
                 rows = req.get("rows", 40)
                 session: PtySession | None = None
                 try:
+                    worktree = req.get("worktree")
+                    if worktree is not None and not isinstance(worktree, dict):
+                        raise ValueError("worktree must be an object")
                     session = self.manager.create_pty(
                         work_dir,
                         tool,
@@ -107,18 +115,18 @@ class DaemonWsServer:
                         launch_mode=req.get("launchMode", "local"),
                         launch_command=req.get("launchCommand"),
                         launch_label=req.get("launchLabel"),
+                        worktree=worktree,
+                        label=req.get("label") if isinstance(req.get("label"), str) else None,
                     )
                     self._subscribe_any(ws, session)
                     await session.start()
                     await self._send(ws, {
                         "type": "pty.created",
-                        "session": json.loads(
-                            json.dumps(session.to_info().__dict__, default=str)
-                        ),
+                        "session": _session_payload(session),
                     })
                 except Exception as exc:
                     if session:
-                        self.manager.remove(session.id)
+                        self.manager.discard_failed_create(session.id)
                     await self._send(ws, {
                         "type": "error",
                         "message": str(exc),
@@ -177,7 +185,7 @@ class DaemonWsServer:
                         "path": str(image.path),
                         "mimeType": image.mime_type,
                         "size": image.size,
-                        "session": json.loads(json.dumps(session.to_info().__dict__, default=str)),
+                        "session": _session_payload(session),
                     })
                 except (SessionImageError, ValueError) as exc:
                     await self._send(ws, {
@@ -196,10 +204,11 @@ class DaemonWsServer:
                         "requestType": msg_type,
                     })
                     return
+                self.manager.mark_seen(session.id)
                 self._subscribe_any(ws, session)
                 payload: dict[str, Any] = {
                     "type": "session.subscribed",
-                    "session": json.loads(json.dumps(session.to_info().__dict__, default=str)),
+                    "session": _session_payload(session),
                 }
                 await self._send(ws, payload)
                 if isinstance(session, PtySession):
@@ -231,7 +240,7 @@ class DaemonWsServer:
                 await self._send(ws, {
                     "type": "session.paused",
                     "sessionId": session_id,
-                    "session": json.loads(json.dumps(session.to_info().__dict__, default=str)) if session else None,
+                    "session": _session_payload(session),
                 })
 
             case "session.resume":
@@ -246,10 +255,50 @@ class DaemonWsServer:
                 session = self.manager.get(session_id)
                 if session:
                     self._subscribe_any(ws, session)
+                    await self._send(ws, {
+                        "type": "session.resumed",
+                        "sessionId": session_id,
+                        "session": _session_payload(session),
+                    })
+
+            case "session.rename":
+                session_id = req.get("sessionId", "")
+                label = req.get("label")
+                if label is not None and not isinstance(label, str):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": "Session label must be a string",
+                        "requestType": msg_type,
+                    })
+                    return
+                if not self.manager.rename(session_id, label):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"Session not found: {session_id}",
+                        "requestType": msg_type,
+                    })
+                    return
+                session = self.manager.get(session_id)
                 await self._send(ws, {
-                    "type": "session.resumed",
+                    "type": "session.renamed",
                     "sessionId": session_id,
-                    "session": json.loads(json.dumps(session.to_info().__dict__, default=str)) if session else None,
+                    "session": _session_payload(session),
+                })
+
+            case "session.mark_seen":
+                session_id = req.get("sessionId", "")
+                if not self.manager.mark_seen(session_id):
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": f"Session not found: {session_id}",
+                        "requestType": msg_type,
+                    })
+                    return
+                session = self.manager.get(session_id)
+                await self._send(ws, {
+                    "type": "session.updated",
+                    "sessionId": session_id,
+                    "session": _session_payload(session),
                 })
 
             case "app.pause":
@@ -321,3 +370,9 @@ class DaemonWsServer:
             await ws.send(json.dumps(data, default=str))
         except websockets.ConnectionClosed:
             pass
+
+
+def _session_payload(session: AnySession | None) -> dict[str, Any] | None:
+    if session is None:
+        return None
+    return asdict(session.to_info())

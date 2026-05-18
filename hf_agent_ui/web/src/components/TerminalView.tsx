@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -45,6 +45,7 @@ export function TerminalView({
   const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
+  const [mobileInput, setMobileInput] = useState('')
 
   useEffect(() => {
     onInputRef.current = onInput
@@ -104,6 +105,7 @@ export function TerminalView({
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
     term.open(containerRef.current)
+    configureTerminalTextarea(containerRef.current)
     fitAddon.fit()
     followOutputRef.current = true
     setShowScrollButton(false)
@@ -269,6 +271,24 @@ export function TerminalView({
     setShowScrollButton(false)
   }
 
+  function sendTerminalInput(data: string): void {
+    if (!data) return
+    onInputRef.current(data)
+  }
+
+  function handleMobileSend(): void {
+    const text = mobileInput
+    if (!text) return
+    sendTerminalInput(`${text}\r`)
+    setMobileInput('')
+  }
+
+  function handleMobileKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    handleMobileSend()
+  }
+
   return (
     <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`} onPasteCapture={handlePaste}>
       {needsInput && (
@@ -319,6 +339,28 @@ export function TerminalView({
         </form>
       )}
       <div ref={containerRef} className="terminal-container" />
+      <div className="mobile-terminal-input" aria-label="Mobile terminal input">
+        <div className="mobile-terminal-shortcuts">
+          <button type="button" onClick={() => sendTerminalInput('\t')}>Tab</button>
+          <button type="button" onClick={() => sendTerminalInput('\x1b')}>Esc</button>
+          <button type="button" onClick={() => sendTerminalInput('\x03')}>Ctrl+C</button>
+          <button type="button" onClick={() => sendTerminalInput('\r')}>Enter</button>
+        </div>
+        <div className="mobile-terminal-compose">
+          <input
+            type="text"
+            value={mobileInput}
+            onChange={event => setMobileInput(event.target.value)}
+            onKeyDown={handleMobileKeyDown}
+            placeholder="Type command"
+            autoCapitalize="none"
+            autoComplete="off"
+          />
+          <button type="button" onClick={handleMobileSend} disabled={!mobileInput}>
+            Send
+          </button>
+        </div>
+      </div>
       {showScrollButton && (
         <button
           type="button"
@@ -344,6 +386,15 @@ interface PendingScreenshot {
 
 function terminalFontSize(): number {
   return window.matchMedia('(max-width: 760px)').matches ? 12 : 13
+}
+
+function configureTerminalTextarea(container: HTMLElement): void {
+  const textarea = container.querySelector('textarea')
+  if (!textarea) return
+  textarea.setAttribute('autocorrect', 'off')
+  textarea.setAttribute('autocapitalize', 'none')
+  textarea.setAttribute('autocomplete', 'off')
+  textarea.spellcheck = false
 }
 
 function isTerminalAtBottom(term: Terminal): boolean {

@@ -1,11 +1,53 @@
 /* Layout */
 .app {
   display: flex;
+  position: relative;
   height: 100vh;
   min-height: 0;
   background: #0d1117;
   color: #e6edf3;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+.app-error-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 140;
+  display: flex;
+  max-width: min(720px, calc(100vw - 24px));
+  min-height: 38px;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(-50%);
+  border: 1px solid #7c2d12;
+  border-radius: 6px;
+  background: #2d160d;
+  color: #ffdfc7;
+  padding: 8px 10px 8px 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
+  font-size: 13px;
+}
+
+.app-error-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-error-banner button {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #ffdfc7;
+  cursor: pointer;
+  font: inherit;
+}
+
+.app-error-banner button:hover {
+  background: rgba(255, 223, 199, 0.12);
 }
 
 /* Sidebar */
@@ -345,6 +387,26 @@
   background: #f0883e;
 }
 
+.status-dot.blocked {
+  background: #f0883e;
+}
+
+.status-dot.working {
+  background: #d29922;
+}
+
+.status-dot.done {
+  background: #58a6ff;
+}
+
+.status-dot.idle {
+  background: #3fb950;
+}
+
+.status-dot.unknown {
+  background: #8b949e;
+}
+
 /* Session items */
 .session-item {
   display: flex;
@@ -373,6 +435,16 @@
 
 .session-item.needs-input.selected {
   background: #9a67004d;
+}
+
+.session-item.needs-review {
+  color: #f0f6fc;
+  background: #1f6feb1d;
+  box-shadow: inset 3px 0 0 #58a6ff;
+}
+
+.session-item.needs-review.selected {
+  background: #1f6feb36;
 }
 
 .empty-session {
@@ -424,6 +496,44 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-git-badges {
+  display: inline-flex;
+  max-width: 92px;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.git-badge {
+  min-width: 0;
+  max-width: 58px;
+  overflow: hidden;
+  padding: 1px 4px;
+  border: 1px solid #30363d;
+  border-radius: 3px;
+  color: #8b949e;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-badge.branch {
+  color: #c9d1d9;
+}
+
+.git-badge.worktree {
+  border-color: #238636;
+  color: #7ee787;
+  text-transform: uppercase;
+}
+
+.git-badge.dirty {
+  color: #d29922;
 }
 
 .session-daemon {
@@ -668,6 +778,10 @@
   white-space: nowrap;
 }
 
+.mobile-terminal-input {
+  display: none;
+}
+
 .session-view-empty {
   flex: 1;
   display: flex;
@@ -736,6 +850,21 @@
 .dialog textarea:focus {
   outline: none;
   border-color: #1f6feb;
+}
+
+.dialog .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e6edf3;
+}
+
+.dialog .checkbox-label input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
 }
 
 .recent-dir-list {
@@ -1213,12 +1342,89 @@
   }
 
   .terminal-container {
-    height: 100%;
+    flex: 1 1 auto;
     min-height: 0;
   }
 
   .terminal-container .xterm {
     padding: 4px;
+  }
+
+  .mobile-terminal-input {
+    display: grid;
+    gap: 7px;
+    flex: 0 0 auto;
+    padding: 8px;
+    border-top: 1px solid #30363d;
+    background: #161b22;
+  }
+
+  .mobile-terminal-shortcuts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .mobile-terminal-compose {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 72px;
+    gap: 7px;
+  }
+
+  .mobile-terminal-input input {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    padding: 0 11px;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    box-sizing: border-box;
+    background: #0d1117;
+    color: #e6edf3;
+    font: inherit;
+    font-size: 16px;
+  }
+
+  .mobile-terminal-input input:focus {
+    outline: none;
+    border-color: #1f6feb;
+  }
+
+  .mobile-terminal-input button {
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 7px;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: #21262d;
+    color: #e6edf3;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .mobile-terminal-input button:disabled {
+    color: #6e7681;
+    cursor: default;
+  }
+
+  .mobile-terminal-compose button {
+    min-height: 42px;
+    border-color: #238636;
+    background: #238636;
+    color: #fff;
+  }
+
+  .mobile-terminal-compose button:disabled {
+    border-color: #30363d;
+    background: #21262d;
+    color: #6e7681;
+  }
+
+  .terminal-scroll-bottom {
+    right: 12px;
+    bottom: 116px;
   }
 
   .screenshot-paste-notice {

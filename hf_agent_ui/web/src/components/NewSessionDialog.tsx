@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Daemon, LaunchMode, LaunchOptions } from '../hooks/useAgentUi'
+import type { Daemon, LaunchMode, LaunchOptions, WorktreeOptions } from '../hooks/useAgentUi'
 
 const CUSTOM_LAUNCH_STORAGE_KEY = 'hf-agent-ui.customLaunch'
 
@@ -13,6 +13,7 @@ interface Props {
     workDir: string,
     tool: string,
     launch: LaunchOptions,
+    worktree?: WorktreeOptions,
   ) => void
 }
 
@@ -33,6 +34,10 @@ export function NewSessionDialog({
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
   const [launchCommand, setLaunchCommand] = useState(storedCustomLaunch.command)
+  const [useWorktree, setUseWorktree] = useState(false)
+  const [worktreeBranch, setWorktreeBranch] = useState(() => defaultWorktreeBranch('codex'))
+  const [worktreeBranchTouched, setWorktreeBranchTouched] = useState(false)
+  const [worktreeStartPoint, setWorktreeStartPoint] = useState('HEAD')
   const [error, setError] = useState<string | null>(null)
   const selectedDaemonId = connectedDaemons.some(daemon => daemon.id === daemonId)
     ? daemonId
@@ -51,13 +56,18 @@ export function NewSessionDialog({
       setError('Custom launch command must include {command}.')
       return
     }
+    const worktree = worktreeOptions(useWorktree, workDir, worktreeBranch, worktreeStartPoint)
+    if (useWorktree && !worktree) {
+      setError('Worktree branch is required.')
+      return
+    }
     if (launch.launchMode === 'custom') {
       writeCustomLaunch({
         label: launch.launchLabel || 'custom',
         command: launch.launchCommand || '',
       })
     }
-    onCreate(selectedDaemonId, workDir, tool, launch)
+    onCreate(selectedDaemonId, workDir, tool, launch, worktree)
     onClose()
   }
 
@@ -93,12 +103,62 @@ export function NewSessionDialog({
           )}
           <label>
             Tool
-            <select value={tool} onChange={e => setTool(e.target.value)}>
+            <select
+              value={tool}
+              onChange={e => {
+                const nextTool = e.target.value
+                setTool(nextTool)
+                if (!worktreeBranchTouched) {
+                  setWorktreeBranch(defaultWorktreeBranch(nextTool))
+                }
+              }}
+            >
               <option value="codex">Codex CLI</option>
               <option value="claude">Claude Code</option>
               <option value="bash">Bash terminal</option>
             </select>
           </label>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={useWorktree}
+              onChange={e => {
+                setUseWorktree(e.target.checked)
+                setError(null)
+              }}
+            />
+            Create worktree
+          </label>
+          {useWorktree && (
+            <>
+              <label>
+                Branch
+                <input
+                  type="text"
+                  value={worktreeBranch}
+                  onChange={e => {
+                    setWorktreeBranch(e.target.value)
+                    setWorktreeBranchTouched(true)
+                    setError(null)
+                  }}
+                  placeholder="agent/codex-20260507-120000"
+                  required
+                />
+              </label>
+              <label>
+                Base ref
+                <input
+                  type="text"
+                  value={worktreeStartPoint}
+                  onChange={e => {
+                    setWorktreeStartPoint(e.target.value)
+                    setError(null)
+                  }}
+                  placeholder="HEAD"
+                />
+              </label>
+            </>
+          )}
           <label>
             Launch
             <select
@@ -139,7 +199,7 @@ export function NewSessionDialog({
             </>
           )}
           <label>
-            Working directory
+            {useWorktree ? 'Source directory' : 'Working directory'}
             {recentWorkDirs.length > 0 && (
               <div className="recent-dir-list" aria-label="Recent directories">
                 {recentWorkDirs.map(dir => (
@@ -206,6 +266,42 @@ function launchOptions(
     launchLabel: launchLabel.trim() || 'custom',
     launchCommand: launchCommand.trim(),
   }
+}
+
+function worktreeOptions(
+  enabled: boolean,
+  sourceDir: string,
+  branch: string,
+  startPoint: string,
+): WorktreeOptions | undefined {
+  if (!enabled) return undefined
+  const trimmedBranch = branch.trim()
+  if (!trimmedBranch) return undefined
+  const trimmedStartPoint = startPoint.trim()
+  return {
+    enabled: true,
+    sourceDir,
+    branch: trimmedBranch,
+    startPoint: trimmedStartPoint || undefined,
+  }
+}
+
+function defaultWorktreeBranch(tool: string): string {
+  const now = new Date()
+  const stamp = [
+    now.getFullYear(),
+    pad2(now.getMonth() + 1),
+    pad2(now.getDate()),
+  ].join('') + '-' + [
+    pad2(now.getHours()),
+    pad2(now.getMinutes()),
+    pad2(now.getSeconds()),
+  ].join('')
+  return `agent/${tool}-${stamp}`
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
 }
 
 function readCustomLaunch(): { label: string; command: string } {

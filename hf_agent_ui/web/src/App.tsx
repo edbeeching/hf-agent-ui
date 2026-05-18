@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAgentUi } from './hooks/useAgentUi'
-import type { Daemon, SessionImagePayload } from './hooks/useAgentUi'
+import type { Daemon, LaunchOptions, SessionImagePayload, SessionInfo } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -41,13 +41,17 @@ function App() {
     daemons,
     sessions,
     ptyOutput,
+    lastError,
     createPtySession,
     sendPtyInput,
     sendSessionImage,
     resizePty,
     removeSession,
+    renameSession,
     listSessions,
     subscribeSession,
+    markSessionSeen,
+    dismissError,
   } = sw
   const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(() => readStoredSelection())
   const [newSessionDaemonIds, setNewSessionDaemonIds] = useState<string[] | null>(null)
@@ -60,9 +64,9 @@ function App() {
   const activeSession = activeSelected
     ? (sessions.get(activeSelected.daemonId) || []).find(session => session.id === activeSelected.sessionId) || null
     : null
-  const inputRequiredCount = [...sessions.values()]
+  const attentionCount = [...sessions.values()]
     .flat()
-    .filter(session => session.needs_input).length
+    .filter(session => session.needs_input || session.agent_state === 'done').length
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
   const newSessionDaemons = newSessionDaemonIds
@@ -121,11 +125,11 @@ function App() {
   }, [activeSelected, connected, subscribeSession])
 
   useEffect(() => {
-    document.title = inputRequiredCount > 0 ? `(${inputRequiredCount}) hf-agent-ui` : 'hf-agent-ui'
+    document.title = attentionCount > 0 ? `(${attentionCount}) hf-agent-ui` : 'hf-agent-ui'
     return () => {
       document.title = 'hf-agent-ui'
     }
-  }, [inputRequiredCount])
+  }, [attentionCount])
 
   if (!auth) {
     return <AuthScreen loading />
@@ -137,6 +141,14 @@ function App() {
 
   return (
     <div className="app">
+      {lastError && (
+        <div className="app-error-banner" role="alert">
+          <span>{lastError.message}</span>
+          <button type="button" onClick={dismissError} aria-label="Dismiss error">
+            x
+          </button>
+        </div>
+      )}
       <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
           <div>
@@ -157,6 +169,7 @@ function App() {
           selectedSession={activeSelected}
           onSelectSession={(daemonId, sessionId) => {
             setSelected({ daemonId, sessionId })
+            markSessionSeen(daemonId, sessionId)
             setActiveMobileView('terminal')
           }}
           onNewSession={daemons => setNewSessionDaemonIds(daemons.map(daemon => daemon.id))}
@@ -168,6 +181,16 @@ function App() {
           }}
           onPauseSession={(daemonId, sessionId) => sw.pauseSession(daemonId, sessionId)}
           onResumeSession={(daemonId, sessionId) => sw.resumeSession(daemonId, sessionId)}
+          onRenameSession={(daemonId, sessionId, label) => renameSession(daemonId, sessionId, label)}
+          onDuplicateSession={(daemonId, session) => {
+            createPtySession(
+              daemonId,
+              session.work_dir,
+              session.tool,
+              duplicateLaunchOptions(session),
+            )
+            setActiveMobileView('terminal')
+          }}
         />
         <ConnectDaemonPanel daemons={daemons} />
       </aside>
@@ -213,7 +236,7 @@ function App() {
           aria-current={activeMobileView === 'sessions' ? 'page' : undefined}
           onClick={() => setActiveMobileView('sessions')}
         >
-          {inputRequiredCount > 0 ? `Sessions (${inputRequiredCount})` : 'Sessions'}
+          {attentionCount > 0 ? `Sessions (${attentionCount})` : 'Sessions'}
         </button>
         <button
           type="button"
@@ -231,10 +254,10 @@ function App() {
           getRecentWorkDirs={getRecentWorkDirs}
           onRemoveRecentWorkDir={removeRecentWorkDirForDaemon}
           onClose={() => setNewSessionDaemonIds(null)}
-          onCreate={(daemonId, workDir, tool, launch) => {
+          onCreate={(daemonId, workDir, tool, launch, worktree) => {
             const daemon = newSessionDaemons.find(daemon => daemon.id === daemonId) || null
             setRecentWorkDirs(current => persistRecentWorkDirs(addRecentWorkDir(current, daemon, workDir)))
-            createPtySession(daemonId, workDir, tool, launch)
+            createPtySession(daemonId, workDir, tool, launch, worktree)
             setActiveMobileView('terminal')
           }}
         />
@@ -242,6 +265,17 @@ function App() {
 
     </div>
   )
+}
+
+function duplicateLaunchOptions(session: SessionInfo): LaunchOptions {
+  if (session.launch_mode !== 'custom') {
+    return { launchMode: 'local' }
+  }
+  return {
+    launchMode: 'custom',
+    launchCommand: session.launch_command || undefined,
+    launchLabel: session.launch_label || undefined,
+  }
 }
 
 function AuthScreen({
