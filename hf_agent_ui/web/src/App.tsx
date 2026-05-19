@@ -188,6 +188,8 @@ function App() {
               session.work_dir,
               session.tool,
               duplicateLaunchOptions(session),
+              undefined,
+              session.label ? `${session.label} copy` : null,
             )
             setActiveMobileView('terminal')
           }}
@@ -254,10 +256,10 @@ function App() {
           getRecentWorkDirs={getRecentWorkDirs}
           onRemoveRecentWorkDir={removeRecentWorkDirForDaemon}
           onClose={() => setNewSessionDaemonIds(null)}
-          onCreate={(daemonId, workDir, tool, launch, worktree) => {
+          onCreate={(daemonId, workDir, tool, launch, worktree, label) => {
             const daemon = newSessionDaemons.find(daemon => daemon.id === daemonId) || null
             setRecentWorkDirs(current => persistRecentWorkDirs(addRecentWorkDir(current, daemon, workDir)))
-            createPtySession(daemonId, workDir, tool, launch, worktree)
+            createPtySession(daemonId, workDir, tool, launch, worktree, label)
             setActiveMobileView('terminal')
           }}
         />

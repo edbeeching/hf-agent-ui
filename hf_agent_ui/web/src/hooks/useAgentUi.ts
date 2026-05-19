@@ -420,6 +420,7 @@ export function useAgentUi(enabled = true) {
     tool: string = 'codex',
     launch: LaunchOptions = { launchMode: 'local' },
     worktree?: WorktreeOptions,
+    label?: string | null,
     cols: number = 120,
     rows: number = 40,
   ) => {
@@ -435,6 +436,7 @@ export function useAgentUi(enabled = true) {
       launchCommand: launch.launchCommand,
       launchLabel: launch.launchLabel,
       worktree,
+      label,
     })
   }, [send])
 
