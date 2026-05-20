@@ -1,11 +1,14 @@
-import { useState } from 'react'
-import type { Daemon, LaunchMode, LaunchOptions, WorktreeOptions } from '../hooks/useAgentUi'
+import { useEffect, useState } from 'react'
+import type { Daemon, LaunchMode, LaunchOptions, WorktreeListResult, WorktreeOptions } from '../hooks/useAgentUi'
 
 const CUSTOM_LAUNCH_STORAGE_KEY = 'hf-agent-ui.customLaunch'
+type WorktreeMode = 'none' | 'create' | 'existing'
 
 interface Props {
   daemons: Daemon[]
   getRecentWorkDirs: (daemon: Daemon | null) => string[]
+  getWorktreeList: (daemonId: string, sourceDir: string) => WorktreeListResult | null
+  onListWorktrees: (daemonId: string, sourceDir: string) => void
   onRemoveRecentWorkDir: (daemon: Daemon, workDir: string) => void
   onClose: () => void
   onCreate: (
@@ -21,6 +24,8 @@ interface Props {
 export function NewSessionDialog({
   daemons,
   getRecentWorkDirs,
+  getWorktreeList,
+  onListWorktrees,
   onRemoveRecentWorkDir,
   onClose,
   onCreate,
@@ -36,16 +41,37 @@ export function NewSessionDialog({
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
   const [launchCommand, setLaunchCommand] = useState(storedCustomLaunch.command)
-  const [useWorktree, setUseWorktree] = useState(false)
+  const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>('none')
   const [worktreeBranch, setWorktreeBranch] = useState(() => defaultWorktreeBranch('codex'))
   const [worktreeBranchTouched, setWorktreeBranchTouched] = useState(false)
   const [worktreeStartPoint, setWorktreeStartPoint] = useState('HEAD')
+  const [selectedWorktree, setSelectedWorktree] = useState<{
+    daemonId: string
+    sourceDir: string
+    root: string
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const selectedDaemonId = connectedDaemons.some(daemon => daemon.id === daemonId)
     ? daemonId
     : defaultDaemonId
   const selectedDaemon = connectedDaemons.find(daemon => daemon.id === selectedDaemonId) || null
   const recentWorkDirs = getRecentWorkDirs(selectedDaemon)
+  const sourceDir = workDir.trim() || '.'
+  const worktreeList = worktreeMode === 'existing' && selectedDaemonId
+    ? getWorktreeList(selectedDaemonId, sourceDir)
+    : null
+  const selectedWorktreeRoot = selectedWorktree?.daemonId === selectedDaemonId
+    && selectedWorktree.sourceDir === sourceDir
+    ? selectedWorktree.root
+    : ''
+
+  useEffect(() => {
+    if (worktreeMode !== 'existing' || !selectedDaemonId || !sourceDir) return
+    const timeout = window.setTimeout(() => {
+      onListWorktrees(selectedDaemonId, sourceDir)
+    }, 250)
+    return () => window.clearTimeout(timeout)
+  }, [worktreeMode, selectedDaemonId, sourceDir, onListWorktrees])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -58,9 +84,13 @@ export function NewSessionDialog({
       setError('Custom launch command must include {command}.')
       return
     }
-    const worktree = worktreeOptions(useWorktree, workDir, worktreeBranch, worktreeStartPoint)
-    if (useWorktree && !worktree) {
+    const worktree = worktreeOptions(worktreeMode, workDir, worktreeBranch, worktreeStartPoint, selectedWorktreeRoot)
+    if (worktreeMode === 'create' && !worktree) {
       setError('Worktree branch is required.')
+      return
+    }
+    if (worktreeMode === 'existing' && !worktree) {
+      setError('Select an existing worktree.')
       return
     }
     if (launch.launchMode === 'custom') {
@@ -130,18 +160,22 @@ export function NewSessionDialog({
               maxLength={120}
             />
           </label>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={useWorktree}
+          <label>
+            Worktree
+            <select
+              value={worktreeMode}
               onChange={e => {
-                setUseWorktree(e.target.checked)
+                setWorktreeMode(e.target.value as WorktreeMode)
+                setSelectedWorktree(null)
                 setError(null)
               }}
-            />
-            Create worktree
+            >
+              <option value="none">None</option>
+              <option value="create">Create new</option>
+              <option value="existing">Use existing</option>
+            </select>
           </label>
-          {useWorktree && (
+          {worktreeMode === 'create' && (
             <>
               <label>
                 Branch
@@ -211,7 +245,7 @@ export function NewSessionDialog({
             </>
           )}
           <label>
-            {useWorktree ? 'Source directory' : 'Working directory'}
+            {worktreeMode === 'none' ? 'Working directory' : 'Source directory'}
             {recentWorkDirs.length > 0 && (
               <div className="recent-dir-list" aria-label="Recent directories">
                 {recentWorkDirs.map(dir => (
@@ -249,15 +283,31 @@ export function NewSessionDialog({
               value={workDir}
               onChange={e => {
                 setWorkDir(e.target.value)
+                setError(null)
               }}
               placeholder="/path/to/project"
               required
             />
           </label>
+          {worktreeMode === 'existing' && (
+            <WorktreePicker
+              result={worktreeList}
+              selectedRoot={selectedWorktreeRoot}
+              onSelect={root => {
+                setSelectedWorktree({ daemonId: selectedDaemonId, sourceDir, root })
+                setError(null)
+              }}
+            />
+          )}
           {error && <div className="dialog-error">{error}</div>}
           <div className="dialog-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit" disabled={!selectedDaemon}>Create</button>
+            <button
+              type="submit"
+              disabled={!selectedDaemon || (worktreeMode === 'existing' && !selectedWorktreeRoot)}
+            >
+              Create
+            </button>
           </div>
         </form>
       </div>
@@ -281,21 +331,79 @@ function launchOptions(
 }
 
 function worktreeOptions(
-  enabled: boolean,
+  mode: WorktreeMode,
   sourceDir: string,
   branch: string,
   startPoint: string,
+  worktreeRoot: string,
 ): WorktreeOptions | undefined {
-  if (!enabled) return undefined
+  if (mode === 'none') return undefined
+  if (mode === 'existing') {
+    const trimmedRoot = worktreeRoot.trim()
+    if (!trimmedRoot) return undefined
+    return {
+      enabled: true,
+      mode: 'existing',
+      sourceDir,
+      worktreeRoot: trimmedRoot,
+    }
+  }
   const trimmedBranch = branch.trim()
   if (!trimmedBranch) return undefined
   const trimmedStartPoint = startPoint.trim()
   return {
     enabled: true,
+    mode: 'create',
     sourceDir,
     branch: trimmedBranch,
     startPoint: trimmedStartPoint || undefined,
   }
+}
+
+function WorktreePicker({
+  result,
+  selectedRoot,
+  onSelect,
+}: {
+  result: WorktreeListResult | null
+  selectedRoot: string
+  onSelect: (root: string) => void
+}) {
+  const worktrees = result?.worktrees || []
+  return (
+    <div className="worktree-picker" aria-label="Existing worktrees">
+      {result?.loading && worktrees.length === 0 && (
+        <div className="worktree-picker-status">Loading worktrees...</div>
+      )}
+      {result?.error && (
+        <div className="worktree-picker-status error">{result.error}</div>
+      )}
+      {!result?.loading && !result?.error && worktrees.length === 0 && (
+        <div className="worktree-picker-status">No linked worktrees found.</div>
+      )}
+      {worktrees.map(worktree => (
+        <button
+          type="button"
+          key={worktree.worktree_root}
+          className={`worktree-row ${selectedRoot === worktree.worktree_root ? 'selected' : ''}`}
+          disabled={!worktree.available}
+          title={worktree.available ? worktree.work_dir : worktree.unavailable_reason || worktree.work_dir}
+          onClick={() => onSelect(worktree.worktree_root)}
+        >
+          <span className="worktree-row-main">
+            <span className="worktree-row-branch">{worktree.branch}</span>
+            <span className="worktree-row-path">{compactPath(worktree.worktree_root)}</span>
+          </span>
+          <span className={`worktree-row-status ${worktree.available ? 'available' : 'unavailable'}`}>
+            {worktree.available ? 'Ready' : 'Missing'}
+          </span>
+        </button>
+      ))}
+      {result?.loading && worktrees.length > 0 && (
+        <div className="worktree-picker-status">Refreshing...</div>
+      )}
+    </div>
+  )
 }
 
 function normalizeSessionLabel(label: string): string | null {
@@ -345,4 +453,12 @@ function projectNameFromPath(path: string): string {
   if (!cleaned || cleaned === '~') return 'Home'
   const parts = cleaned.split(/[\\/]+/)
   return parts[parts.length - 1] || cleaned
+}
+
+function compactPath(path: string): string {
+  const trimmed = path.trim().replace(/[\\/]+$/, '')
+  if (!trimmed || trimmed === '~') return 'Home'
+  const parts = trimmed.split(/[\\/]+/).filter(Boolean)
+  if (parts.length <= 2) return trimmed
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }

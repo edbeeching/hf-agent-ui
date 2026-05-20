@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from hf_agent_ui.daemon.session_manager import SessionManager
+from hf_agent_ui.daemon.worktrees import list_existing_worktrees
 
 
 def test_session_manager_default_tool_is_codex(tmp_path: Path) -> None:
@@ -123,7 +124,79 @@ def test_session_manager_creates_worktree_session(tmp_path: Path) -> None:
     assert Path(session.work_dir).is_dir()
     assert session.worktree is not None
     assert session.worktree.branch == "agent/test-session"
+    assert session.worktree.managed is True
     assert _git(repo, "show-ref", "--verify", "--quiet", "refs/heads/agent/test-session").returncode == 0
+
+
+def test_list_existing_worktrees_excludes_source_and_computes_work_dir(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    existing_root = repo / ".worktrees" / "feature-existing"
+    _git(repo, "worktree", "add", "-b", "feature/existing", str(existing_root), "HEAD", check=True)
+
+    worktrees = list_existing_worktrees(str(source_dir))
+
+    assert len(worktrees) == 1
+    item = worktrees[0]
+    assert item.source_dir == str(source_dir.resolve())
+    assert item.repo_root == str(repo.resolve())
+    assert item.worktree_root == str(existing_root.resolve())
+    assert item.work_dir == str((existing_root / "app").resolve())
+    assert item.branch == "feature/existing"
+    assert item.available is True
+    assert item.unavailable_reason is None
+
+
+def test_session_manager_attaches_existing_worktree_without_managing_it(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    existing_root = repo / ".worktrees" / "feature-attach"
+    _git(repo, "worktree", "add", "-b", "feature/attach", str(existing_root), "HEAD", check=True)
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    session = manager.create_pty(
+        str(source_dir),
+        tool="bash",
+        worktree={
+            "enabled": True,
+            "mode": "existing",
+            "sourceDir": str(source_dir),
+            "worktreeRoot": str(existing_root),
+        },
+    )
+
+    assert session.work_dir == str((existing_root / "app").resolve())
+    assert session.worktree is not None
+    assert session.worktree.branch == "feature/attach"
+    assert session.worktree.managed is False
+    assert Path(session.work_dir).is_dir()
+
+
+def test_session_manager_does_not_cleanup_attached_worktree_when_construction_fails(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    existing_root = repo / ".worktrees" / "feature-keep"
+    _git(repo, "worktree", "add", "-b", "feature/keep", str(existing_root), "HEAD", check=True)
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    with pytest.raises(ValueError, match="Unknown launch mode"):
+        manager.create_pty(
+            str(source_dir),
+            tool="bash",
+            launch_mode="invalid",
+            worktree={
+                "enabled": True,
+                "mode": "existing",
+                "sourceDir": str(source_dir),
+                "worktreeRoot": str(existing_root),
+            },
+        )
+
+    assert existing_root.is_dir()
+    assert _git(repo, "show-ref", "--verify", "--quiet", "refs/heads/feature/keep").returncode == 0
+    assert manager.list() == []
 
 
 def test_session_manager_cleans_up_worktree_when_session_construction_fails(tmp_path: Path) -> None:

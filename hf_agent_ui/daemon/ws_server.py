@@ -12,6 +12,7 @@ from websockets.asyncio.server import Server, ServerConnection
 from .pty_session import PtySession
 from .session_assets import SessionImageError, save_session_image
 from .session_manager import AnySession, SessionManager
+from .worktrees import list_existing_worktrees
 
 logger = logging.getLogger(__name__)
 MAX_WS_MESSAGE_BYTES = 12 * 1024 * 1024
@@ -38,6 +39,7 @@ class DaemonWsServer:
       { type: "session.remove", sessionId }
       { type: "session.list" }
       { type: "session.subscribe", sessionId }
+      { type: "worktrees.list", sourceDir }
 
     Server -> Client:
       { type: "pty.created", session: PtySessionInfo }
@@ -50,6 +52,7 @@ class DaemonWsServer:
       { type: "session.renamed", sessionId, session }
       { type: "session.updated", sessionId, session }
       { type: "session.list", sessions: [...] }
+      { type: "worktrees.list", sourceDir, worktrees: [...] }
       { type: "error", message, requestType? }
     """
 
@@ -97,6 +100,24 @@ class DaemonWsServer:
         msg_type = req.get("type", "")
 
         match msg_type:
+            case "worktrees.list":
+                source_dir = req.get("sourceDir", ".")
+                if not isinstance(source_dir, str):
+                    source_dir = "."
+                try:
+                    await self._send(ws, {
+                        "type": "worktrees.list",
+                        "sourceDir": source_dir,
+                        "worktrees": [asdict(item) for item in list_existing_worktrees(source_dir)],
+                    })
+                except Exception as exc:
+                    await self._send(ws, {
+                        "type": "error",
+                        "message": str(exc),
+                        "requestType": msg_type,
+                        "sourceDir": source_dir,
+                    })
+
             case "pty.create":
                 tool = req.get("tool", "codex")
                 work_dir = req.get("workDir", ".")

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useAgentUi } from './hooks/useAgentUi'
-import type { Daemon, LaunchOptions, SessionImagePayload, SessionInfo } from './hooks/useAgentUi'
+import { useAgentUi, worktreeListKey } from './hooks/useAgentUi'
+import type { Daemon, LaunchOptions, SessionImagePayload, SessionInfo, WorktreeListResult } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -40,9 +40,11 @@ function App() {
     connected,
     daemons,
     sessions,
+    worktreeLists,
     ptyOutput,
     lastError,
     createPtySession,
+    listWorktrees,
     sendPtyInput,
     sendSessionImage,
     resizePty,
@@ -79,6 +81,11 @@ function App() {
   const removeRecentWorkDirForDaemon = useCallback((daemon: Daemon, workDir: string) => {
     setRecentWorkDirs(current => persistRecentWorkDirs(removeRecentWorkDir(current, daemon, workDir)))
   }, [])
+  const getWorktreeList = useCallback(
+    (daemonId: string, sourceDir: string): WorktreeListResult | null =>
+      worktreeLists.get(worktreeListKey(daemonId, sourceDir)) || null,
+    [worktreeLists],
+  )
 
   useEffect(() => {
     let disposed = false
@@ -254,6 +261,8 @@ function App() {
         <NewSessionDialog
           daemons={newSessionDaemons}
           getRecentWorkDirs={getRecentWorkDirs}
+          getWorktreeList={getWorktreeList}
+          onListWorktrees={listWorktrees}
           onRemoveRecentWorkDir={removeRecentWorkDirForDaemon}
           onClose={() => setNewSessionDaemonIds(null)}
           onCreate={(daemonId, workDir, tool, launch, worktree, label) => {

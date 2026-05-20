@@ -262,6 +262,81 @@ async def test_create_worktree_session_cleans_up_if_start_fails(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_list_existing_worktrees_via_ws(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "scratch"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("scratch\n", encoding="utf-8")
+    _git(repo, "add", ".", check=True)
+    _git(repo, "commit", "-m", "add scratch", check=True)
+    existing_root = repo / ".worktrees" / "feature-ws-list"
+    _git(repo, "worktree", "add", "-b", "feature/ws-list", str(existing_root), "HEAD", check=True)
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "worktrees.list",
+                "sourceDir": str(source_dir),
+            })
+
+            list_msg = next(m for m in msgs if m["type"] == "worktrees.list")
+            assert list_msg["sourceDir"] == str(source_dir)
+            assert len(list_msg["worktrees"]) == 1
+            item = list_msg["worktrees"][0]
+            assert item["branch"] == "feature/ws-list"
+            assert item["worktree_root"] == str(existing_root.resolve())
+            assert item["work_dir"] == str((existing_root / "scratch").resolve())
+            assert item["available"] is True
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_create_existing_worktree_session_via_ws(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "scratch"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("scratch\n", encoding="utf-8")
+    _git(repo, "add", ".", check=True)
+    _git(repo, "commit", "-m", "add scratch", check=True)
+    existing_root = repo / ".worktrees" / "feature-ws-attach"
+    _git(repo, "worktree", "add", "-b", "feature/ws-attach", str(existing_root), "HEAD", check=True)
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(source_dir),
+                "tool": "mock",
+                "worktree": {
+                    "enabled": True,
+                    "mode": "existing",
+                    "sourceDir": str(source_dir),
+                    "worktreeRoot": str(existing_root),
+                },
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["work_dir"] == str((existing_root / "scratch").resolve())
+            assert created["session"]["worktree"]["branch"] == "feature/ws-attach"
+            assert created["session"]["worktree"]["managed"] is False
+            assert existing_root.is_dir()
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_send_pty_input_and_stream_output_via_ws(tmp_path: Path) -> None:
     """Send input via WS and verify terminal output comes back."""

@@ -44,6 +44,24 @@ def test_session_list_response_targets_requesting_browser_only() -> None:
     assert relay._targets_for_daemon_message("daemon-1", {"type": "session.list"}) == set()
 
 
+def test_worktrees_list_response_targets_requesting_browser_only() -> None:
+    relay = WsRelay(pool=None)  # type: ignore[arg-type]
+    browser_a = object()
+    browser_b = object()
+    relay._clients.update({browser_a, browser_b})  # type: ignore[arg-type]
+
+    relay._track_browser_request(browser_a, "daemon-1", {"type": "worktrees.list"})  # type: ignore[arg-type]
+
+    targets = relay._targets_for_daemon_message("daemon-1", {
+        "type": "worktrees.list",
+        "sourceDir": "/repo",
+        "worktrees": [],
+    })
+
+    assert targets == {browser_a}
+    assert relay._targets_for_daemon_message("daemon-1", {"type": "worktrees.list"}) == set()
+
+
 def test_pty_events_target_subscribed_browser_only() -> None:
     relay = WsRelay(pool=None)  # type: ignore[arg-type]
     browser_a = object()

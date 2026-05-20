@@ -30,6 +30,7 @@ class WsRelay:
       -> { type: "session.mark_seen", daemonId, sessionId }
       -> { type: "session.list", daemonId }
       -> { type: "session.subscribe", daemonId, sessionId }
+      -> { type: "worktrees.list", daemonId, sourceDir }
 
       <- { type: "pty.created", daemonId, session }
       <- { type: "pty.output", daemonId, sessionId, data }
@@ -41,6 +42,7 @@ class WsRelay:
       <- { type: "session.renamed", daemonId, sessionId, session }
       <- { type: "session.updated", daemonId, sessionId, session }
       <- { type: "session.list", daemonId, sessions }
+      <- { type: "worktrees.list", daemonId, sourceDir, worktrees }
       <- { type: "error", message }
     """
 
@@ -131,6 +133,10 @@ class WsRelay:
             self._pending_requests[(daemon_id, "session.list")].append(ws)
             return
 
+        if msg_type == "worktrees.list":
+            self._pending_requests[(daemon_id, "worktrees.list")].append(ws)
+            return
+
         if msg_type == "session.image.send":
             self._pending_requests[(daemon_id, "session.image.send")].append(ws)
             if isinstance(session_id, str) and session_id:
@@ -166,6 +172,10 @@ class WsRelay:
 
         if msg_type == "session.list":
             target = self._pop_pending(daemon_id, "session.list")
+            return {target} if target else set()
+
+        if msg_type == "worktrees.list":
+            target = self._pop_pending(daemon_id, "worktrees.list")
             return {target} if target else set()
 
         if msg_type == "session.subscribed":

@@ -14,12 +14,22 @@ export interface LaunchOptions {
   launchLabel?: string
 }
 
-export interface WorktreeOptions {
+export interface CreateWorktreeOptions {
   enabled: true
+  mode?: 'create'
   sourceDir: string
   branch: string
   startPoint?: string
 }
+
+export interface ExistingWorktreeOptions {
+  enabled: true
+  mode: 'existing'
+  sourceDir: string
+  worktreeRoot: string
+}
+
+export type WorktreeOptions = CreateWorktreeOptions | ExistingWorktreeOptions
 
 export interface SessionWorktreeInfo {
   source_dir: string
@@ -27,6 +37,25 @@ export interface SessionWorktreeInfo {
   worktree_root: string
   branch: string
   start_point: string
+  managed: boolean
+}
+
+export interface WorktreeListItem {
+  source_dir: string
+  repo_root: string
+  worktree_root: string
+  work_dir: string
+  branch: string
+  start_point: string
+  available: boolean
+  unavailable_reason: string | null
+}
+
+export interface WorktreeListResult {
+  sourceDir: string
+  worktrees: WorktreeListItem[]
+  loading: boolean
+  error: string | null
 }
 
 export type AgentState = 'blocked' | 'working' | 'done' | 'idle' | 'unknown'
@@ -94,6 +123,7 @@ interface AgentUiState {
   connected: boolean
   daemons: Daemon[]
   sessions: Map<string, SessionInfo[]>
+  worktreeLists: Map<string, WorktreeListResult>
   ptyOutput: Map<string, string[]>  // sessionId -> raw terminal output chunks
   lastError: AgentUiError | null
 }
@@ -113,6 +143,8 @@ interface ServerMessage {
   detectedAt?: string
   status?: string
   requestType?: string
+  sourceDir?: string
+  worktrees?: unknown[]
 }
 
 interface InputRequiredUpdate {
@@ -130,6 +162,7 @@ export function useAgentUi(enabled = true) {
     connected: false,
     daemons: [],
     sessions: new Map(),
+    worktreeLists: new Map(),
     ptyOutput: new Map(),
     lastError: null,
   })
@@ -147,7 +180,14 @@ export function useAgentUi(enabled = true) {
             sessions.delete(daemonId)
           }
         }
-        return { ...s, daemons, sessions }
+        const worktreeLists = new Map(s.worktreeLists)
+        for (const key of worktreeLists.keys()) {
+          const daemonId = key.split('\0', 1)[0]
+          if (!daemonIds.has(daemonId)) {
+            worktreeLists.delete(key)
+          }
+        }
+        return { ...s, daemons, sessions, worktreeLists }
       })
     } catch {
       // Hub not available
@@ -201,6 +241,24 @@ export function useAgentUi(enabled = true) {
             .filter(session => session.mode === 'pty')
             .map(normalizeSession))
           return { ...s, sessions }
+        })
+        break
+      }
+
+      case 'worktrees.list': {
+        if (!daemonId || typeof msg.sourceDir !== 'string') return
+        const worktrees = Array.isArray(msg.worktrees)
+          ? msg.worktrees.map(normalizeWorktreeListItem).filter((item): item is WorktreeListItem => Boolean(item))
+          : []
+        setState(s => {
+          const worktreeLists = new Map(s.worktreeLists)
+          worktreeLists.set(worktreeListKey(daemonId, msg.sourceDir || '.'), {
+            sourceDir: msg.sourceDir || '.',
+            worktrees,
+            loading: false,
+            error: null,
+          })
+          return { ...s, worktreeLists }
         })
         break
       }
@@ -330,6 +388,19 @@ export function useAgentUi(enabled = true) {
         const rawMessage = typeof msg.message === 'string' && msg.message.trim()
           ? msg.message.trim()
           : 'Unknown error'
+        if (requestType === 'worktrees.list' && daemonId && typeof msg.sourceDir === 'string') {
+          setState(s => {
+            const worktreeLists = new Map(s.worktreeLists)
+            worktreeLists.set(worktreeListKey(daemonId, msg.sourceDir || '.'), {
+              sourceDir: msg.sourceDir || '.',
+              worktrees: [],
+              loading: false,
+              error: rawMessage,
+            })
+            return { ...s, worktreeLists }
+          })
+          break
+        }
         const message = requestType === 'pty.create'
           ? `Could not create session: ${rawMessage}`
           : rawMessage
@@ -440,6 +511,22 @@ export function useAgentUi(enabled = true) {
     })
   }, [send])
 
+  const listWorktrees = useCallback((daemonId: string, sourceDir: string) => {
+    const normalizedSourceDir = sourceDir.trim() || '.'
+    setState(s => {
+      const worktreeLists = new Map(s.worktreeLists)
+      const previous = worktreeLists.get(worktreeListKey(daemonId, normalizedSourceDir))
+      worktreeLists.set(worktreeListKey(daemonId, normalizedSourceDir), {
+        sourceDir: normalizedSourceDir,
+        worktrees: previous?.worktrees || [],
+        loading: true,
+        error: null,
+      })
+      return { ...s, worktreeLists }
+    })
+    send({ type: 'worktrees.list', daemonId, sourceDir: normalizedSourceDir })
+  }, [send])
+
   const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string) => {
     send({ type: 'pty.input', daemonId, sessionId, data })
     if (data) updateSessionInputRequired(sessionId, false)
@@ -532,6 +619,7 @@ export function useAgentUi(enabled = true) {
   return {
     ...state,
     createPtySession,
+    listWorktrees,
     sendPtyInput,
     sendSessionImage,
     resizePty,
@@ -621,6 +709,32 @@ function normalizeWorktree(worktree: unknown): SessionWorktreeInfo | null {
     worktree_root: candidate.worktree_root,
     branch: candidate.branch,
     start_point: typeof candidate.start_point === 'string' ? candidate.start_point : 'HEAD',
+    managed: typeof candidate.managed === 'boolean' ? candidate.managed : true,
+  }
+}
+
+function normalizeWorktreeListItem(value: unknown): WorktreeListItem | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.source_dir !== 'string'
+    || typeof candidate.repo_root !== 'string'
+    || typeof candidate.worktree_root !== 'string'
+    || typeof candidate.work_dir !== 'string'
+    || typeof candidate.branch !== 'string'
+    || typeof candidate.start_point !== 'string'
+  ) {
+    return null
+  }
+  return {
+    source_dir: candidate.source_dir,
+    repo_root: candidate.repo_root,
+    worktree_root: candidate.worktree_root,
+    work_dir: candidate.work_dir,
+    branch: candidate.branch,
+    start_point: candidate.start_point,
+    available: Boolean(candidate.available),
+    unavailable_reason: typeof candidate.unavailable_reason === 'string' ? candidate.unavailable_reason : null,
   }
 }
 
@@ -636,6 +750,10 @@ function normalizeGit(git: unknown): SessionGitInfo | null {
     is_worktree: Boolean(candidate.is_worktree),
     repo_root: candidate.repo_root,
   }
+}
+
+export function worktreeListKey(daemonId: string, sourceDir: string): string {
+  return `${daemonId}\0${sourceDir.trim() || '.'}`
 }
 
 function updateSession(
