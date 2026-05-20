@@ -14,6 +14,7 @@ interface Props {
     tool: string,
     launch: LaunchOptions,
     worktree?: WorktreeOptions,
+    label?: string | null,
   ) => void
 }
 
@@ -30,6 +31,7 @@ export function NewSessionDialog({
   const storedCustomLaunch = readCustomLaunch()
   const [daemonId, setDaemonId] = useState(defaultDaemonId)
   const [tool, setTool] = useState('codex')
+  const [sessionLabel, setSessionLabel] = useState('')
   const [workDir, setWorkDir] = useState(getRecentWorkDirs(defaultDaemon)[0] || '~')
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
@@ -67,7 +69,7 @@ export function NewSessionDialog({
         command: launch.launchCommand || '',
       })
     }
-    onCreate(selectedDaemonId, workDir, tool, launch, worktree)
+    onCreate(selectedDaemonId, workDir, tool, launch, worktree, normalizeSessionLabel(sessionLabel))
     onClose()
   }
 
@@ -117,6 +119,16 @@ export function NewSessionDialog({
               <option value="claude">Claude Code</option>
               <option value="bash">Bash terminal</option>
             </select>
+          </label>
+          <label>
+            Session label
+            <input
+              type="text"
+              value={sessionLabel}
+              onChange={e => setSessionLabel(e.target.value)}
+              placeholder="auth fix, tests, review"
+              maxLength={120}
+            />
           </label>
           <label className="checkbox-label">
             <input
@@ -284,6 +296,11 @@ function worktreeOptions(
     branch: trimmedBranch,
     startPoint: trimmedStartPoint || undefined,
   }
+}
+
+function normalizeSessionLabel(label: string): string | null {
+  const trimmed = label.trim()
+  return trimmed || null
 }
 
 function defaultWorktreeBranch(tool: string): string {

@@ -216,7 +216,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 16px 4px 24px;
+  padding: 3px 12px 3px 22px;
   color: #8b949e;
   font-size: 11px;
   font-weight: 600;
@@ -317,7 +317,7 @@
 /* Tool badges */
 .tool-badge {
   font-size: 9px;
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: 3px;
   font-weight: 600;
   text-transform: uppercase;
@@ -340,9 +340,9 @@
 }
 
 .launch-badge {
-  max-width: 58px;
+  max-width: 46px;
   overflow: hidden;
-  padding: 1px 5px;
+  padding: 1px 4px;
   border: 1px solid #30363d;
   border-radius: 3px;
   color: #c9d1d9;
@@ -355,8 +355,8 @@
 
 /* Status dots */
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -411,9 +411,10 @@
 .session-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 16px 6px 40px;
-  font-size: 12px;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 10px 3px 34px;
+  font-size: 11px;
   cursor: pointer;
   color: #8b949e;
 }
@@ -457,9 +458,9 @@
 }
 
 .input-required-badge {
-  min-width: 34px;
-  height: 16px;
-  padding: 0 5px;
+  min-width: 30px;
+  height: 15px;
+  padding: 0 4px;
   border-radius: 999px;
   flex-shrink: 0;
   display: inline-flex;
@@ -467,7 +468,7 @@
   justify-content: center;
   background: #f0883e;
   color: #1f1300;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -490,7 +491,7 @@
   color: #240808;
 }
 
-.session-dir {
+.session-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -498,9 +499,14 @@
   white-space: nowrap;
 }
 
+.session-name.labeled {
+  color: #f0f6fc;
+  font-weight: 700;
+}
+
 .session-git-badges {
   display: inline-flex;
-  max-width: 92px;
+  max-width: 74px;
   flex: 0 1 auto;
   align-items: center;
   gap: 3px;
@@ -509,13 +515,13 @@
 
 .git-badge {
   min-width: 0;
-  max-width: 58px;
+  max-width: 46px;
   overflow: hidden;
-  padding: 1px 4px;
+  padding: 1px 3px;
   border: 1px solid #30363d;
   border-radius: 3px;
   color: #8b949e;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   line-height: 12px;
   text-overflow: ellipsis;

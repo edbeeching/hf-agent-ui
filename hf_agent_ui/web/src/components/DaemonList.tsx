@@ -132,13 +132,13 @@ export function DaemonList({
             disabled={!contextSession}
             onClick={() => {
               if (!contextSession) return
-              const nextLabel = window.prompt('Session name', contextSession.label || projectNameForSession(contextSession))
+              const nextLabel = window.prompt('Session label', contextSession.label || '')
               if (nextLabel === null) return
               onRenameSession(contextMenu.daemonId, contextMenu.sessionId, nextLabel.trim() || null)
               setContextMenu(null)
             }}
           >
-            Rename
+            Label
           </button>
           <button
             type="button"
@@ -253,7 +253,12 @@ function ProjectSection({
             </span>
           )}
           <GitBadges session={session} />
-          <span className="session-dir" title={session.work_dir}>{session.label || session.work_dir}</span>
+          <span
+            className={`session-name ${session.label ? 'labeled' : ''}`}
+            title={session.work_dir}
+          >
+            {sessionDisplayName(session)}
+          </span>
           {project.daemons.size > 1 && (
             <span className="session-daemon" title={daemon.hostname || daemon.host}>{daemon.name}</span>
           )}
@@ -372,6 +377,20 @@ function projectNameFromPath(path: string): string {
 
 function projectNameForSession(session: SessionInfo): string {
   return projectNameFromPath(session.worktree?.source_dir || session.work_dir)
+}
+
+function sessionDisplayName(session: SessionInfo): string {
+  if (session.label) return session.label
+  if (session.worktree?.branch) return session.worktree.branch
+  return compactPath(session.work_dir)
+}
+
+function compactPath(path: string): string {
+  const trimmed = path.trim().replace(/[\\/]+$/, '')
+  if (!trimmed || trimmed === '~') return 'Home'
+  const parts = trimmed.split(/[\\/]+/).filter(Boolean)
+  if (parts.length <= 2) return trimmed
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 
 function countProjectSessions(project: ProjectGroup): number {
