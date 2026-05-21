@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import shutil
 import stat
 import subprocess
 import sys
@@ -281,10 +282,12 @@ async def test_list_existing_worktrees_via_ws(tmp_path: Path) -> None:
             msgs = await _send_recv(ws, {
                 "type": "worktrees.list",
                 "sourceDir": str(source_dir),
+                "requestId": "req-list",
             })
 
             list_msg = next(m for m in msgs if m["type"] == "worktrees.list")
             assert list_msg["sourceDir"] == str(source_dir)
+            assert list_msg["requestId"] == "req-list"
             assert len(list_msg["worktrees"]) == 1
             item = list_msg["worktrees"][0]
             assert item["branch"] == "feature/ws-list"
@@ -559,6 +562,36 @@ async def test_pause_and_resume_session_via_ws(tmp_path: Path) -> None:
             assert resumed["sessionId"] == session_id
             assert resumed["session"]["status"] == "running"
             assert manager.get(session_id).to_info().status == "running"
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_resume_missing_work_dir_returns_error_and_keeps_ws_alive(tmp_path: Path) -> None:
+    work_dir = tmp_path / "gone"
+    work_dir.mkdir()
+    manager = SessionManager(tmp_path / "state.json")
+    session = manager.create_pty(str(work_dir), tool="mock")
+    shutil.rmtree(work_dir)
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "session.resume",
+                "sessionId": session.id,
+            })
+            error = next(m for m in msgs if m["type"] == "error")
+            assert error["requestType"] == "session.resume"
+            assert error["sessionId"] == session.id
+
+            msgs = await _send_recv(ws, {"type": "session.list"})
+            list_msg = next(m for m in msgs if m["type"] == "session.list")
+            assert [item["id"] for item in list_msg["sessions"]] == [session.id]
     finally:
         manager.stop_all()
         await server.stop()

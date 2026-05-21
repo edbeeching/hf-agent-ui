@@ -30,7 +30,7 @@ class WsRelay:
       -> { type: "session.mark_seen", daemonId, sessionId }
       -> { type: "session.list", daemonId }
       -> { type: "session.subscribe", daemonId, sessionId }
-      -> { type: "worktrees.list", daemonId, sourceDir }
+      -> { type: "worktrees.list", daemonId, sourceDir, requestId? }
 
       <- { type: "pty.created", daemonId, session }
       <- { type: "pty.output", daemonId, sessionId, data }
@@ -42,7 +42,7 @@ class WsRelay:
       <- { type: "session.renamed", daemonId, sessionId, session }
       <- { type: "session.updated", daemonId, sessionId, session }
       <- { type: "session.list", daemonId, sessions }
-      <- { type: "worktrees.list", daemonId, sourceDir, worktrees }
+      <- { type: "worktrees.list", daemonId, sourceDir, requestId?, worktrees }
       <- { type: "error", message }
     """
 
@@ -52,6 +52,7 @@ class WsRelay:
         self._client_owners: dict[WebSocket, str] = {}
         self._session_subscribers: dict[tuple[str, str], set[WebSocket]] = defaultdict(set)
         self._pending_requests: dict[tuple[str, str], Deque[WebSocket]] = defaultdict(deque)
+        self._pending_worktree_requests: dict[tuple[str, str], WebSocket] = {}
 
     async def handle_browser(self, ws: WebSocket, user: UserIdentity) -> None:
         await ws.accept()
@@ -83,11 +84,14 @@ class WsRelay:
         daemon_id = str(daemon_id)
         owner_sub = self._client_owners.get(ws)
         if not owner_sub or not self.pool.owns(daemon_id, owner_sub):
-            await self._send_to_browser(ws, {
+            error = {
                 "type": "error",
                 "message": f"No connection to agent host {daemon_id}",
                 "requestType": req.get("type"),
-            })
+                "daemonId": daemon_id,
+            }
+            _copy_request_context(req, error)
+            await self._send_to_browser(ws, error)
             return
         self._track_browser_request(ws, daemon_id, req)
         # Forward to daemon, stripping daemonId (daemon doesn't need it)
@@ -95,11 +99,15 @@ class WsRelay:
         try:
             await self.pool.send(daemon_id, daemon_msg)
         except RuntimeError as e:
-            await self._send_to_browser(ws, {
+            self._untrack_browser_request(ws, daemon_id, req)
+            error = {
                 "type": "error",
                 "message": str(e),
                 "requestType": req.get("type"),
-            })
+                "daemonId": daemon_id,
+            }
+            _copy_request_context(req, error)
+            await self._send_to_browser(ws, error)
 
     async def on_daemon_message(self, daemon_id: str, msg: dict[str, Any]) -> None:
         """Called by the connection pool when a daemon sends a message."""
@@ -134,7 +142,11 @@ class WsRelay:
             return
 
         if msg_type == "worktrees.list":
-            self._pending_requests[(daemon_id, "worktrees.list")].append(ws)
+            request_id = _request_id(req)
+            if request_id:
+                self._pending_worktree_requests[(daemon_id, request_id)] = ws
+            else:
+                self._pending_requests[(daemon_id, "worktrees.list")].append(ws)
             return
 
         if msg_type == "session.image.send":
@@ -175,7 +187,7 @@ class WsRelay:
             return {target} if target else set()
 
         if msg_type == "worktrees.list":
-            target = self._pop_pending(daemon_id, "worktrees.list")
+            target = self._pop_pending_worktree_request(daemon_id, msg)
             return {target} if target else set()
 
         if msg_type == "session.subscribed":
@@ -207,6 +219,11 @@ class WsRelay:
         if msg_type == "error":
             request_type = msg.get("requestType")
             if isinstance(request_type, str):
+                if request_type == "worktrees.list":
+                    target = self._pop_pending_worktree_request(daemon_id, msg)
+                    if target:
+                        return {target}
+                    return set()
                 target = self._pop_pending(daemon_id, request_type)
                 if target:
                     return {target}
@@ -232,9 +249,37 @@ class WsRelay:
             pending.popleft()
         return None
 
+    def _pop_pending_worktree_request(self, daemon_id: str, msg: dict[str, Any]) -> WebSocket | None:
+        request_id = _request_id(msg)
+        if request_id:
+            target = self._pending_worktree_requests.pop((daemon_id, request_id), None)
+            if target in self._clients:
+                return target
+            return None
+        return self._pop_pending(daemon_id, "worktrees.list")
+
+    def _untrack_browser_request(self, ws: WebSocket, daemon_id: str, req: dict[str, Any]) -> None:
+        if req.get("type") != "worktrees.list":
+            return
+        request_id = _request_id(req)
+        if request_id:
+            if self._pending_worktree_requests.get((daemon_id, request_id)) is ws:
+                self._pending_worktree_requests.pop((daemon_id, request_id), None)
+            return
+        pending = self._pending_requests.get((daemon_id, "worktrees.list"))
+        if not pending:
+            return
+        try:
+            pending.remove(ws)
+        except ValueError:
+            pass
+
     def _remove_client(self, ws: WebSocket) -> None:
         for subscribers in self._session_subscribers.values():
             subscribers.discard(ws)
+        for key, target in list(self._pending_worktree_requests.items()):
+            if target is ws:
+                self._pending_worktree_requests.pop(key, None)
         for pending in self._pending_requests.values():
             try:
                 while True:
@@ -260,3 +305,17 @@ def _session_id(msg: dict[str, Any]) -> str | None:
         if isinstance(nested, str) and nested:
             return nested
     return None
+
+
+def _request_id(msg: dict[str, Any]) -> str | None:
+    request_id = msg.get("requestId")
+    return request_id if isinstance(request_id, str) and request_id else None
+
+
+def _copy_request_context(source: dict[str, Any], target: dict[str, Any]) -> None:
+    request_id = source.get("requestId")
+    if isinstance(request_id, str):
+        target["requestId"] = request_id
+    source_dir = source.get("sourceDir")
+    if isinstance(source_dir, str):
+        target["sourceDir"] = source_dir

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -10,6 +11,9 @@ from typing import Any, Mapping
 
 class WorktreeError(ValueError):
     """Raised when a requested Git worktree cannot be prepared."""
+
+
+_MANAGED_WORKTREE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,7 @@ class WorktreeSource:
     source_path: Path
     repo_root: Path
     relative_source: Path
+    common_git_dir: Path
 
 
 def prepare_worktree(request: Mapping[str, Any], fallback_source_dir: str) -> PreparedWorktree:
@@ -60,25 +65,26 @@ def prepare_worktree(request: Mapping[str, Any], fallback_source_dir: str) -> Pr
     if not branch:
         raise WorktreeError("Worktree branch is required")
 
-    source = _worktree_source(source_dir)
+    with _MANAGED_WORKTREE_LOCK:
+        source = _worktree_source(source_dir)
 
-    _validate_branch(source.repo_root, branch)
-    _ensure_branch_does_not_exist(source.repo_root, branch)
+        _validate_branch(source.repo_root, branch)
+        _ensure_branch_does_not_exist(source.repo_root, branch)
 
-    worktrees_dir = source.repo_root / ".worktrees"
-    worktree_root = worktrees_dir / _sanitize_branch_path(branch)
-    if worktree_root.exists():
-        raise WorktreeError(f"Worktree path already exists: {worktree_root}")
+        worktrees_dir = source.repo_root / ".worktrees"
+        worktree_root = worktrees_dir / _sanitize_branch_path(branch)
+        if worktree_root.exists():
+            raise WorktreeError(f"Worktree path already exists: {worktree_root}")
 
-    worktrees_dir.mkdir(exist_ok=True)
-    try:
-        _git_output(
-            ["worktree", "add", "-b", branch, str(worktree_root), start_point],
-            cwd=source.repo_root,
-        )
-    except WorktreeError:
-        _cleanup_worktree_path_and_branch(source.repo_root, worktree_root, branch)
-        raise
+        worktrees_dir.mkdir(exist_ok=True)
+        try:
+            _git_output(
+                ["worktree", "add", "-b", branch, str(worktree_root), start_point],
+                cwd=source.repo_root,
+            )
+        except WorktreeError:
+            _cleanup_worktree_path_and_branch(source.repo_root, worktree_root, branch)
+            raise
 
     work_dir = worktree_root / source.relative_source
     return PreparedWorktree(
@@ -108,7 +114,7 @@ def list_existing_worktrees(source_dir: str) -> list[WorktreeListItem]:
 
         work_dir = (worktree_root / source.relative_source).resolve()
         branch = _worktree_branch_label(record)
-        available = work_dir.is_dir()
+        available, unavailable_reason = _worktree_availability(source, record, worktree_root, work_dir)
         items.append(WorktreeListItem(
             source_dir=str(source.source_path),
             repo_root=str(source.repo_root),
@@ -117,7 +123,7 @@ def list_existing_worktrees(source_dir: str) -> list[WorktreeListItem]:
             branch=branch,
             start_point=record.get("HEAD") or branch,
             available=available,
-            unavailable_reason=None if available else f"Missing directory: {work_dir}",
+            unavailable_reason=unavailable_reason,
         ))
     return items
 
@@ -153,7 +159,8 @@ def cleanup_prepared_worktree(metadata: WorktreeMetadata) -> None:
         return
     repo_root = Path(metadata.repo_root).resolve()
     worktree_root = Path(metadata.worktree_root).resolve()
-    _cleanup_worktree_path_and_branch(repo_root, worktree_root, metadata.branch)
+    with _MANAGED_WORKTREE_LOCK:
+        _cleanup_worktree_path_and_branch(repo_root, worktree_root, metadata.branch)
 
 
 def worktree_metadata_from_record(value: object) -> WorktreeMetadata | None:
@@ -183,11 +190,56 @@ def _worktree_source(source_dir: str) -> WorktreeSource:
         raise WorktreeError(f"Worktree source directory does not exist: {source_dir}")
 
     repo_root = Path(_git_output(["rev-parse", "--show-toplevel"], cwd=source_path)).resolve()
+    common_git_dir = Path(_git_output([
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ], cwd=source_path)).resolve()
     try:
         relative_source = source_path.relative_to(repo_root)
     except ValueError as exc:
         raise WorktreeError(f"Worktree source is not inside Git repository: {source_dir}") from exc
-    return WorktreeSource(source_path=source_path, repo_root=repo_root, relative_source=relative_source)
+    return WorktreeSource(
+        source_path=source_path,
+        repo_root=repo_root,
+        relative_source=relative_source,
+        common_git_dir=common_git_dir,
+    )
+
+
+def _worktree_availability(
+    source: WorktreeSource,
+    record: Mapping[str, str],
+    worktree_root: Path,
+    work_dir: Path,
+) -> tuple[bool, str | None]:
+    prunable_reason = _string_field(record.get("prunable"))
+    if prunable_reason or "prunable" in record:
+        return False, f"Prunable worktree: {prunable_reason or 'git marked this worktree prunable'}"
+    if not work_dir.is_dir():
+        return False, f"Missing directory: {work_dir}"
+    try:
+        top_level = Path(_git_output(["rev-parse", "--show-toplevel"], cwd=work_dir)).resolve()
+        git_dir = Path(_git_output([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+        ], cwd=work_dir)).resolve()
+        common_git_dir = Path(_git_output([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ], cwd=work_dir)).resolve()
+    except WorktreeError as exc:
+        return False, str(exc)
+
+    if top_level != worktree_root:
+        return False, f"Worktree root mismatch: expected {worktree_root}, got {top_level}"
+    if git_dir == common_git_dir:
+        return False, "Primary worktree is not attachable"
+    if common_git_dir != source.common_git_dir:
+        return False, "Worktree belongs to a different repository"
+    return True, None
 
 
 def _validate_branch(repo_root: Path, branch: str) -> None:

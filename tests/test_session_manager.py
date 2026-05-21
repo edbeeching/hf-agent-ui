@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import shutil
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
+from hf_agent_ui.daemon import worktrees as worktrees_module
 from hf_agent_ui.daemon.session_manager import SessionManager
-from hf_agent_ui.daemon.worktrees import list_existing_worktrees
+from hf_agent_ui.daemon.worktrees import WorktreeError, list_existing_worktrees
 
 
 def test_session_manager_default_tool_is_codex(tmp_path: Path) -> None:
@@ -147,6 +152,22 @@ def test_list_existing_worktrees_excludes_source_and_computes_work_dir(tmp_path:
     assert item.unavailable_reason is None
 
 
+def test_list_existing_worktrees_marks_prunable_worktree_unavailable(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    existing_root = repo / ".worktrees" / "feature-prunable"
+    _git(repo, "worktree", "add", "-b", "feature/prunable", str(existing_root), "HEAD", check=True)
+    shutil.rmtree(existing_root)
+    (existing_root / "app").mkdir(parents=True)
+
+    worktrees = list_existing_worktrees(str(source_dir))
+
+    item = next(worktree for worktree in worktrees if worktree.branch == "feature/prunable")
+    assert item.available is False
+    assert item.unavailable_reason is not None
+    assert "prunable" in item.unavailable_reason.lower()
+
+
 def test_session_manager_attaches_existing_worktree_without_managing_it(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path / "repo")
     source_dir = repo / "app"
@@ -173,6 +194,30 @@ def test_session_manager_attaches_existing_worktree_without_managing_it(tmp_path
     assert Path(session.work_dir).is_dir()
 
 
+def test_session_manager_rejects_prunable_existing_worktree(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    existing_root = repo / ".worktrees" / "feature-stale"
+    _git(repo, "worktree", "add", "-b", "feature/stale", str(existing_root), "HEAD", check=True)
+    shutil.rmtree(existing_root)
+    (existing_root / "app").mkdir(parents=True)
+    manager = SessionManager(tmp_path / "state.json")
+
+    with pytest.raises(WorktreeError, match="Prunable worktree"):
+        manager.create_pty(
+            str(source_dir),
+            tool="bash",
+            worktree={
+                "enabled": True,
+                "mode": "existing",
+                "sourceDir": str(source_dir),
+                "worktreeRoot": str(existing_root),
+            },
+        )
+
+    assert manager.list() == []
+
+
 def test_session_manager_does_not_cleanup_attached_worktree_when_construction_fails(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path / "repo")
     source_dir = repo / "app"
@@ -197,6 +242,64 @@ def test_session_manager_does_not_cleanup_attached_worktree_when_construction_fa
     assert existing_root.is_dir()
     assert _git(repo, "show-ref", "--verify", "--quiet", "refs/heads/feature/keep").returncode == 0
     assert manager.list() == []
+
+
+def test_managed_worktree_create_is_serialized(monkeypatch, tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "app"
+    original_git_output = worktrees_module._git_output
+    active_adds = 0
+    max_active_adds = 0
+    active_lock = threading.Lock()
+
+    def slow_git_output(args: list[str], *, cwd: Path) -> str:
+        nonlocal active_adds, max_active_adds
+        if args[:2] == ["worktree", "add"]:
+            with active_lock:
+                active_adds += 1
+                max_active_adds = max(max_active_adds, active_adds)
+            try:
+                time.sleep(0.2)
+                return original_git_output(args, cwd=cwd)
+            finally:
+                with active_lock:
+                    active_adds -= 1
+        return original_git_output(args, cwd=cwd)
+
+    monkeypatch.setattr(worktrees_module, "_git_output", slow_git_output)
+
+    def create(state_name: str) -> object:
+        manager = SessionManager(tmp_path / state_name)
+        return manager.create_pty(
+            str(source_dir),
+            tool="bash",
+            worktree={
+                "enabled": True,
+                "sourceDir": str(source_dir),
+                "branch": "agent/serialized",
+                "startPoint": "HEAD",
+            },
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(create, "state-a.json"),
+            executor.submit(create, "state-b.json"),
+        ]
+        results: list[object] = []
+        errors: list[BaseException] = []
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                results.append(future.result())
+            except BaseException as exc:
+                errors.append(exc)
+
+    assert len(results) == 1
+    assert len(errors) == 1
+    assert isinstance(errors[0], WorktreeError)
+    assert max_active_adds == 1
+    assert (repo / ".worktrees" / "agent-serialized").is_dir()
+    assert _git(repo, "show-ref", "--verify", "--quiet", "refs/heads/agent/serialized").returncode == 0
 
 
 def test_session_manager_cleans_up_worktree_when_session_construction_fails(tmp_path: Path) -> None:

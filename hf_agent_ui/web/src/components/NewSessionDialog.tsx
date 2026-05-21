@@ -64,6 +64,9 @@ export function NewSessionDialog({
     && selectedWorktree.sourceDir === sourceDir
     ? selectedWorktree.root
     : ''
+  const selectedWorktreeRow = worktreeList?.worktrees.find(worktree =>
+    worktree.worktree_root === selectedWorktreeRoot && worktree.available
+  ) || null
 
   useEffect(() => {
     if (worktreeMode !== 'existing' || !selectedDaemonId || !sourceDir) return
@@ -84,7 +87,10 @@ export function NewSessionDialog({
       setError('Custom launch command must include {command}.')
       return
     }
-    const worktree = worktreeOptions(worktreeMode, workDir, worktreeBranch, worktreeStartPoint, selectedWorktreeRoot)
+    const existingWorktreeRoot = worktreeMode === 'existing'
+      ? selectedWorktreeRow?.worktree_root || ''
+      : selectedWorktreeRoot
+    const worktree = worktreeOptions(worktreeMode, workDir, worktreeBranch, worktreeStartPoint, existingWorktreeRoot)
     if (worktreeMode === 'create' && !worktree) {
       setError('Worktree branch is required.')
       return
@@ -302,10 +308,7 @@ export function NewSessionDialog({
           {error && <div className="dialog-error">{error}</div>}
           <div className="dialog-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button
-              type="submit"
-              disabled={!selectedDaemon || (worktreeMode === 'existing' && !selectedWorktreeRoot)}
-            >
+            <button type="submit" disabled={!selectedDaemon || (worktreeMode === 'existing' && !selectedWorktreeRow)}>
               Create
             </button>
           </div>
@@ -372,6 +375,9 @@ function WorktreePicker({
   const worktrees = result?.worktrees || []
   return (
     <div className="worktree-picker" aria-label="Existing worktrees">
+      {!result && (
+        <div className="worktree-picker-status">Loading worktrees...</div>
+      )}
       {result?.loading && worktrees.length === 0 && (
         <div className="worktree-picker-status">Loading worktrees...</div>
       )}
@@ -387,6 +393,7 @@ function WorktreePicker({
           key={worktree.worktree_root}
           className={`worktree-row ${selectedRoot === worktree.worktree_root ? 'selected' : ''}`}
           disabled={!worktree.available}
+          aria-pressed={selectedRoot === worktree.worktree_root}
           title={worktree.available ? worktree.work_dir : worktree.unavailable_reason || worktree.work_dir}
           onClick={() => onSelect(worktree.worktree_root)}
         >

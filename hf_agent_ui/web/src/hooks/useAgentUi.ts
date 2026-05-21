@@ -3,6 +3,7 @@ import { ensureUiTokenCookie, initializeUiTokenFromUrl, uiAuthFetch, uiWebSocket
 
 type JsonObject = Record<string, unknown>
 const AGENT_WORKING_WINDOW_MS = 20_000
+const WORKTREE_LIST_TIMEOUT_MS = 10_000
 
 initializeUiTokenFromUrl()
 
@@ -56,6 +57,7 @@ export interface WorktreeListResult {
   worktrees: WorktreeListItem[]
   loading: boolean
   error: string | null
+  requestId: string | null
 }
 
 export type AgentState = 'blocked' | 'working' | 'done' | 'idle' | 'unknown'
@@ -143,6 +145,7 @@ interface ServerMessage {
   detectedAt?: string
   status?: string
   requestType?: string
+  requestId?: string
   sourceDir?: string
   worktrees?: unknown[]
 }
@@ -158,6 +161,7 @@ interface InputRequiredUpdate {
 
 export function useAgentUi(enabled = true) {
   const wsRef = useRef<WebSocket | null>(null)
+  const worktreeListTimeoutsRef = useRef<Map<string, { requestId: string; timeoutId: number }>>(new Map())
   const [state, setState] = useState<AgentUiState>({
     connected: false,
     daemons: [],
@@ -185,6 +189,7 @@ export function useAgentUi(enabled = true) {
           const daemonId = key.split('\0', 1)[0]
           if (!daemonIds.has(daemonId)) {
             worktreeLists.delete(key)
+            clearWorktreeListTimeout(worktreeListTimeoutsRef.current, key)
           }
         }
         return { ...s, daemons, sessions, worktreeLists }
@@ -247,16 +252,24 @@ export function useAgentUi(enabled = true) {
 
       case 'worktrees.list': {
         if (!daemonId || typeof msg.sourceDir !== 'string') return
+        const key = worktreeListKey(daemonId, msg.sourceDir || '.')
+        const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
+        const pending = worktreeListTimeoutsRef.current.get(key)
+        if (requestId && pending && pending.requestId !== requestId) return
+        clearWorktreeListTimeout(worktreeListTimeoutsRef.current, key, requestId || undefined)
         const worktrees = Array.isArray(msg.worktrees)
           ? msg.worktrees.map(normalizeWorktreeListItem).filter((item): item is WorktreeListItem => Boolean(item))
           : []
         setState(s => {
           const worktreeLists = new Map(s.worktreeLists)
-          worktreeLists.set(worktreeListKey(daemonId, msg.sourceDir || '.'), {
+          const previous = worktreeLists.get(key)
+          if (requestId && previous?.loading && previous.requestId && previous.requestId !== requestId) return s
+          worktreeLists.set(key, {
             sourceDir: msg.sourceDir || '.',
             worktrees,
             loading: false,
             error: null,
+            requestId: null,
           })
           return { ...s, worktreeLists }
         })
@@ -389,13 +402,21 @@ export function useAgentUi(enabled = true) {
           ? msg.message.trim()
           : 'Unknown error'
         if (requestType === 'worktrees.list' && daemonId && typeof msg.sourceDir === 'string') {
+          const key = worktreeListKey(daemonId, msg.sourceDir || '.')
+          const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
+          const pending = worktreeListTimeoutsRef.current.get(key)
+          if (requestId && pending && pending.requestId !== requestId) break
+          clearWorktreeListTimeout(worktreeListTimeoutsRef.current, key, requestId || undefined)
           setState(s => {
             const worktreeLists = new Map(s.worktreeLists)
-            worktreeLists.set(worktreeListKey(daemonId, msg.sourceDir || '.'), {
+            const previous = worktreeLists.get(key)
+            if (requestId && previous?.loading && previous.requestId && previous.requestId !== requestId) return s
+            worktreeLists.set(key, {
               sourceDir: msg.sourceDir || '.',
-              worktrees: [],
+              worktrees: previous?.worktrees || [],
               loading: false,
               error: rawMessage,
+              requestId: null,
             })
             return { ...s, worktreeLists }
           })
@@ -424,6 +445,13 @@ export function useAgentUi(enabled = true) {
     }, 5000)
     return () => clearInterval(interval)
   }, [enabled])
+
+  useEffect(() => () => {
+    for (const { timeoutId } of worktreeListTimeoutsRef.current.values()) {
+      window.clearTimeout(timeoutId)
+    }
+    worktreeListTimeoutsRef.current.clear()
+  }, [])
 
   useEffect(() => {
     if (!enabled) {
@@ -513,18 +541,38 @@ export function useAgentUi(enabled = true) {
 
   const listWorktrees = useCallback((daemonId: string, sourceDir: string) => {
     const normalizedSourceDir = sourceDir.trim() || '.'
+    const key = worktreeListKey(daemonId, normalizedSourceDir)
+    if (worktreeListTimeoutsRef.current.has(key)) return
+    const requestId = newRequestId()
     setState(s => {
       const worktreeLists = new Map(s.worktreeLists)
-      const previous = worktreeLists.get(worktreeListKey(daemonId, normalizedSourceDir))
-      worktreeLists.set(worktreeListKey(daemonId, normalizedSourceDir), {
+      const previous = worktreeLists.get(key)
+      worktreeLists.set(key, {
         sourceDir: normalizedSourceDir,
         worktrees: previous?.worktrees || [],
         loading: true,
         error: null,
+        requestId,
       })
       return { ...s, worktreeLists }
     })
-    send({ type: 'worktrees.list', daemonId, sourceDir: normalizedSourceDir })
+    const timeoutId = window.setTimeout(() => {
+      worktreeListTimeoutsRef.current.delete(key)
+      setState(s => {
+        const worktreeLists = new Map(s.worktreeLists)
+        const current = worktreeLists.get(key)
+        if (!current?.loading || current.requestId !== requestId) return s
+        worktreeLists.set(key, {
+          ...current,
+          loading: false,
+          error: 'Timed out listing worktrees.',
+          requestId: null,
+        })
+        return { ...s, worktreeLists }
+      })
+    }, WORKTREE_LIST_TIMEOUT_MS)
+    worktreeListTimeoutsRef.current.set(key, { requestId, timeoutId })
+    send({ type: 'worktrees.list', daemonId, sourceDir: normalizedSourceDir, requestId })
   }, [send])
 
   const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string) => {
@@ -754,6 +802,21 @@ function normalizeGit(git: unknown): SessionGitInfo | null {
 
 export function worktreeListKey(daemonId: string, sourceDir: string): string {
   return `${daemonId}\0${sourceDir.trim() || '.'}`
+}
+
+function clearWorktreeListTimeout(
+  timeouts: Map<string, { requestId: string; timeoutId: number }>,
+  key: string,
+  requestId?: string,
+) {
+  const pending = timeouts.get(key)
+  if (!pending || (requestId && pending.requestId !== requestId)) return
+  window.clearTimeout(pending.timeoutId)
+  timeouts.delete(key)
+}
+
+function newRequestId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 function updateSession(
