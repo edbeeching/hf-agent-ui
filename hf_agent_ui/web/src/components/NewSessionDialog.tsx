@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { supportsYoloMode } from '../hooks/useAgentUi'
 import type { Daemon, LaunchMode, LaunchOptions, WorktreeListResult, WorktreeOptions } from '../hooks/useAgentUi'
 
 const CUSTOM_LAUNCH_STORAGE_KEY = 'hf-agent-ui.customLaunch'
@@ -41,6 +42,7 @@ export function NewSessionDialog({
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
   const [launchCommand, setLaunchCommand] = useState(storedCustomLaunch.command)
+  const [yoloMode, setYoloMode] = useState(false)
   const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>('none')
   const [worktreeBranch, setWorktreeBranch] = useState(() => defaultWorktreeBranch('codex'))
   const [worktreeBranchTouched, setWorktreeBranchTouched] = useState(false)
@@ -82,7 +84,7 @@ export function NewSessionDialog({
       setError('Selected agent host is no longer available.')
       return
     }
-    const launch = launchOptions(launchMode, launchLabel, launchCommand)
+    const launch = launchOptions(launchMode, launchLabel, launchCommand, tool, yoloMode)
     if (launch.launchMode === 'custom' && !launch.launchCommand?.includes('{command}')) {
       setError('Custom launch command must include {command}.')
       return
@@ -146,6 +148,9 @@ export function NewSessionDialog({
               onChange={e => {
                 const nextTool = e.target.value
                 setTool(nextTool)
+                if (!supportsYoloMode(nextTool)) {
+                  setYoloMode(false)
+                }
                 if (!worktreeBranchTouched) {
                   setWorktreeBranch(defaultWorktreeBranch(nextTool))
                 }
@@ -156,6 +161,25 @@ export function NewSessionDialog({
               <option value="bash">Bash terminal</option>
             </select>
           </label>
+          {supportsYoloMode(tool) && (
+            <>
+              <label className="checkbox-label" title="Skip approval and sandbox permission prompts for this session">
+                <input
+                  type="checkbox"
+                  checked={yoloMode}
+                  aria-describedby="yolo-mode-help"
+                  onChange={e => {
+                    setYoloMode(e.target.checked)
+                    setError(null)
+                  }}
+                />
+                YOLO mode
+              </label>
+              <div id="yolo-mode-help" className="field-help warning">
+                Skips approval and sandbox prompts for this session.
+              </div>
+            </>
+          )}
           <label>
             Session label
             <input
@@ -322,15 +346,22 @@ function launchOptions(
   launchMode: LaunchMode,
   launchLabel: string,
   launchCommand: string,
+  tool: string,
+  yoloMode: boolean,
 ): LaunchOptions {
+  const yolo = supportsYoloMode(tool) && yoloMode
   if (launchMode !== 'custom') {
-    return { launchMode: 'local' }
+    return yolo ? { launchMode: 'local', yoloMode: true } : { launchMode: 'local' }
   }
-  return {
+  const launch: LaunchOptions = {
     launchMode: 'custom',
     launchLabel: launchLabel.trim() || 'custom',
     launchCommand: launchCommand.trim(),
   }
+  if (yolo) {
+    launch.yoloMode = true
+  }
+  return launch
 }
 
 function worktreeOptions(

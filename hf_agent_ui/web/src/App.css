@@ -353,6 +353,17 @@
   flex-shrink: 0;
 }
 
+.yolo-badge {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border: 1px solid #8b3a35;
+  border-radius: 3px;
+  color: #ff7b72;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 /* Status dots */
 .status-dot {
   width: 7px;
@@ -871,6 +882,17 @@
   margin: 0;
   padding: 0;
   flex: 0 0 auto;
+}
+
+.field-help {
+  margin: -6px 0 12px 24px;
+  color: #8b949e;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.field-help.warning {
+  color: #d29922;
 }
 
 .recent-dir-list {
@@ -1440,7 +1462,8 @@
   }
 
   .tool-badge,
-  .launch-badge {
+  .launch-badge,
+  .yolo-badge {
     font-size: 10px;
   }
 

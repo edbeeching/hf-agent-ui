@@ -13,6 +13,7 @@ export interface LaunchOptions {
   launchMode: LaunchMode
   launchCommand?: string
   launchLabel?: string
+  yoloMode?: boolean
 }
 
 export interface CreateWorktreeOptions {
@@ -109,6 +110,7 @@ export interface SessionInfo {
   launch_mode: LaunchMode
   launch_command: string | null
   launch_label: string | null
+  yolo_mode: boolean
   worktree: SessionWorktreeInfo | null
   git: SessionGitInfo | null
 }
@@ -534,6 +536,7 @@ export function useAgentUi(enabled = true) {
       launchMode: launch.launchMode,
       launchCommand: launch.launchCommand,
       launchLabel: launch.launchLabel,
+      ...(launch.yoloMode === true ? { yoloMode: true } : {}),
       worktree,
       label,
     })
@@ -705,9 +708,14 @@ function normalizeSession(session: SessionInfo): SessionInfo {
     launch_mode: session.launch_mode === 'custom' ? 'custom' : 'local',
     launch_command: typeof session.launch_command === 'string' ? session.launch_command : null,
     launch_label: typeof session.launch_label === 'string' ? session.launch_label : null,
+    yolo_mode: supportsYoloMode(session.tool) && session.yolo_mode === true,
     worktree: normalizeWorktree(session.worktree),
     git: normalizeGit(session.git),
   }
+}
+
+export function supportsYoloMode(tool: unknown): boolean {
+  return tool === 'claude' || tool === 'codex'
 }
 
 function upsertSession(list: SessionInfo[], session: SessionInfo): SessionInfo[] {

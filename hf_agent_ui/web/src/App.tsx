@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useAgentUi, worktreeListKey } from './hooks/useAgentUi'
+import { supportsYoloMode, useAgentUi, worktreeListKey } from './hooks/useAgentUi'
 import type { Daemon, LaunchOptions, SessionImagePayload, SessionInfo, WorktreeListResult } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
@@ -190,11 +190,14 @@ function App() {
           onResumeSession={(daemonId, sessionId) => sw.resumeSession(daemonId, sessionId)}
           onRenameSession={(daemonId, sessionId, label) => renameSession(daemonId, sessionId, label)}
           onDuplicateSession={(daemonId, session) => {
+            const preserveYolo = supportsYoloMode(session.tool) && session.yolo_mode
+              ? window.confirm('Duplicate this session with YOLO mode enabled? This skips approval and sandbox prompts.')
+              : false
             createPtySession(
               daemonId,
               session.work_dir,
               session.tool,
-              duplicateLaunchOptions(session),
+              duplicateLaunchOptions(session, preserveYolo),
               undefined,
               session.label ? `${session.label} copy` : null,
             )
@@ -278,15 +281,20 @@ function App() {
   )
 }
 
-function duplicateLaunchOptions(session: SessionInfo): LaunchOptions {
+function duplicateLaunchOptions(session: SessionInfo, preserveYolo: boolean): LaunchOptions {
+  const yoloMode = preserveYolo && supportsYoloMode(session.tool)
   if (session.launch_mode !== 'custom') {
-    return { launchMode: 'local' }
+    return yoloMode ? { launchMode: 'local', yoloMode: true } : { launchMode: 'local' }
   }
-  return {
+  const launch: LaunchOptions = {
     launchMode: 'custom',
     launchCommand: session.launch_command || undefined,
     launchLabel: session.launch_label || undefined,
   }
+  if (yoloMode) {
+    launch.yoloMode = true
+  }
+  return launch
 }
 
 function AuthScreen({

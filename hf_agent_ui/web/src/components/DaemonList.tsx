@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { supportsYoloMode } from '../hooks/useAgentUi'
 import type { Daemon, SessionInfo } from '../hooks/useAgentUi'
 
 interface Props {
@@ -250,6 +251,15 @@ function ProjectSection({
           {session.launch_mode === 'custom' && (
             <span className="launch-badge" title={session.launch_command || 'Custom launch'}>
               {session.launch_label || 'custom'}
+            </span>
+          )}
+          {supportsYoloMode(session.tool) && session.yolo_mode && (
+            <span
+              className="yolo-badge"
+              title="YOLO mode enabled: skips approval and sandbox prompts"
+              aria-label="YOLO mode enabled: skips approval and sandbox prompts"
+            >
+              yolo
             </span>
           )}
           <GitBadges session={session} />

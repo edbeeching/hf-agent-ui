@@ -21,7 +21,7 @@ class WsRelay:
     Receives messages from daemons (via pool callback), routes to subscribed browsers.
 
     Browser protocol:
-      -> { type: "pty.create", daemonId, workDir, tool?, cols?, rows? }
+      -> { type: "pty.create", daemonId, workDir, tool?, cols?, rows?, yoloMode? }
       -> { type: "pty.input", daemonId, sessionId, data }
       -> { type: "pty.resize", daemonId, sessionId, cols, rows }
       -> { type: "session.image.send", daemonId, sessionId, filename, mimeType, dataBase64, prompt }

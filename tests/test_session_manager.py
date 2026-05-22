@@ -93,6 +93,29 @@ def test_session_manager_persists_custom_launch_metadata(tmp_path: Path) -> None
     assert restored_info["launch_label"] == "gpu"
 
 
+def test_session_manager_persists_yolo_mode_for_agent_tools(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    session = manager.create_pty(str(tmp_path), tool="codex", yolo_mode=True)
+
+    assert session.to_info().yolo_mode is True
+
+    restored = SessionManager(state_path)
+
+    assert restored.list()[0]["yolo_mode"] is True
+
+
+def test_session_manager_ignores_yolo_mode_for_bash(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    manager = SessionManager(state_path)
+
+    session = manager.create_pty(str(tmp_path), tool="bash", yolo_mode=True)
+
+    assert session.to_info().yolo_mode is False
+    assert manager.list()[0]["yolo_mode"] is False
+
+
 def test_session_manager_persists_label_and_seen_metadata(tmp_path: Path) -> None:
     state_path = tmp_path / "state.json"
     manager = SessionManager(state_path)

@@ -25,7 +25,7 @@ class DaemonWsServer:
     Protocol (client = hub, server = daemon):
 
     Client -> Server:
-      { type: "pty.create", workDir, tool?, cols?, rows?, launchMode?, launchCommand?, launchLabel?, worktree? }
+      { type: "pty.create", workDir, tool?, cols?, rows?, launchMode?, launchCommand?, launchLabel?, yoloMode?, worktree? }
       { type: "pty.input", sessionId, data }
       { type: "pty.resize", sessionId, cols, rows }
       { type: "session.image.send", sessionId, filename, mimeType, dataBase64, prompt }
@@ -145,6 +145,7 @@ class DaemonWsServer:
                         launch_mode=req.get("launchMode", "local"),
                         launch_command=req.get("launchCommand"),
                         launch_label=req.get("launchLabel"),
+                        yolo_mode=req.get("yoloMode") is True,
                         worktree=worktree,
                         label=req.get("label") if isinstance(req.get("label"), str) else None,
                     )

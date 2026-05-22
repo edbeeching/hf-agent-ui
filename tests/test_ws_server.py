@@ -171,6 +171,55 @@ async def test_create_pty_session_defaults_to_codex_via_ws(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_create_codex_yolo_session_via_ws(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+                "tool": "codex",
+                "yoloMode": True,
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["tool"] == "codex"
+            assert created["session"]["yolo_mode"] is True
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_create_pty_session_ignores_non_boolean_yolo_mode(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+                "tool": "codex",
+                "yoloMode": "true",
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["yolo_mode"] is False
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_create_custom_launch_pty_session_via_ws(tmp_path: Path) -> None:
     """Create a PTY session through a custom launch wrapper."""
