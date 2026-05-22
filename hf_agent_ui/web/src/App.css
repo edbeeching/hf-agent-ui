@@ -353,6 +353,17 @@
   flex-shrink: 0;
 }
 
+.yolo-badge {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border: 1px solid #8b3a35;
+  border-radius: 3px;
+  color: #ff7b72;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 /* Status dots */
 .status-dot {
   width: 7px;
@@ -873,6 +884,17 @@
   flex: 0 0 auto;
 }
 
+.field-help {
+  margin: -6px 0 12px 24px;
+  color: #8b949e;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.field-help.warning {
+  color: #d29922;
+}
+
 .recent-dir-list {
   display: grid;
   gap: 6px;
@@ -941,6 +963,99 @@
   cursor: pointer;
 }
 
+.worktree-picker {
+  display: grid;
+  gap: 6px;
+  margin: -2px 0 12px;
+}
+
+.worktree-picker-status {
+  padding: 7px 9px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.worktree-picker-status.error {
+  color: #ff7b72;
+}
+
+.worktree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.worktree-row:hover:not(:disabled) {
+  background: #1c2128;
+}
+
+.worktree-row.selected {
+  border-color: #1f6feb;
+  background: #1f6feb1f;
+}
+
+.worktree-row:disabled {
+  cursor: default;
+  opacity: 0.64;
+}
+
+.worktree-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.worktree-row-branch,
+.worktree-row-path {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-row-branch {
+  color: #e6edf3;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.worktree-row-path {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.worktree-row-status {
+  padding: 1px 5px;
+  border: 1px solid #30363d;
+  border-radius: 999px;
+  color: #8b949e;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.worktree-row-status.available {
+  border-color: #238636;
+  color: #7ee787;
+}
+
+.worktree-row-status.unavailable {
+  border-color: #8b3a35;
+  color: #ff7b72;
+}
+
 .dialog-error {
   margin-top: 4px;
   color: #ff7b72;
@@ -969,7 +1084,15 @@
   border-color: #238636;
 }
 
-.dialog-actions button:hover {
+.dialog-actions button:disabled {
+  color: #6e7681;
+  cursor: default;
+  background: #21262d;
+  border-color: #30363d;
+  filter: none;
+}
+
+.dialog-actions button:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
@@ -1339,7 +1462,8 @@
   }
 
   .tool-badge,
-  .launch-badge {
+  .launch-badge,
+  .yolo-badge {
     font-size: 10px;
   }
 

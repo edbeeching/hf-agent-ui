@@ -71,6 +71,7 @@ class PtySessionInfo:
     launch_mode: str
     launch_command: str | None
     launch_label: str | None
+    yolo_mode: bool
     worktree: WorktreeMetadata | None
     git: GitStatusInfo | None
 
@@ -100,6 +101,7 @@ class PtySession:
         launch_mode: str = "local",
         launch_command: str | None = None,
         launch_label: str | None = None,
+        yolo_mode: bool = False,
         worktree: WorktreeMetadata | None = None,
         label: str | None = None,
         last_activity_at: str | None = None,
@@ -121,6 +123,7 @@ class PtySession:
         self.launch_mode = _normalize_launch_mode(launch_mode)
         self.launch_command = _normalize_launch_command(self.launch_mode, launch_command)
         self.launch_label = _normalize_launch_label(self.launch_mode, launch_label)
+        self.yolo_mode = _normalize_yolo_mode(self.tool, yolo_mode)
         self.worktree = worktree
         self.needs_input = False
         self.needs_input_reason: str | None = None
@@ -249,6 +252,8 @@ class PtySession:
     ) -> list[str]:
         args = list(cmd)
         if self.tool == "claude":
+            if self.yolo_mode:
+                args.append("--dangerously-skip-permissions")
             if resume and self.resume_token:
                 args.extend(["--resume", self.resume_token])
             elif not resume:
@@ -257,6 +262,8 @@ class PtySession:
         elif self.tool == "codex":
             if self._codex_hook_enabled:
                 args.extend(_codex_hook_config_args())
+            if self.yolo_mode:
+                args.append("--dangerously-bypass-approvals-and-sandbox")
             args.extend(["--cd", self.work_dir])
             if resume:
                 args.append("resume")
@@ -547,6 +554,7 @@ class PtySession:
             launch_mode=self.launch_mode,
             launch_command=self.launch_command,
             launch_label=self.launch_label,
+            yolo_mode=self.yolo_mode,
             worktree=self.worktree,
             git=self.git_status(),
         )
@@ -569,6 +577,7 @@ class PtySession:
             "launch_mode": self.launch_mode,
             "launch_command": self.launch_command,
             "launch_label": self.launch_label,
+            "yolo_mode": self.yolo_mode,
             "worktree": asdict(self.worktree) if self.worktree else None,
             "last_activity_at": self.last_activity_at,
             "last_seen_at": self.last_seen_at,
@@ -1019,6 +1028,10 @@ def _normalize_launch_label(launch_mode: str, value: object) -> str | None:
         return None
     label = value.strip() if isinstance(value, str) else ""
     return label or "custom"
+
+
+def _normalize_yolo_mode(tool: str, value: object) -> bool:
+    return tool in {"claude", "codex"} and value is True
 
 
 def _normalize_label(value: object) -> str | None:

@@ -104,6 +104,14 @@ def test_bash_tool_builds_plain_shell_command(tmp_path: Path) -> None:
     assert session._pause_exit_command() == "exit\r"
 
 
+def test_bash_ignores_yolo_mode(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path), tool="bash", yolo_mode=True)
+
+    assert session.yolo_mode is False
+    assert session.to_info().yolo_mode is False
+    assert session._build_tool_args(["bash"], resume=False) == ["bash"]
+
+
 def test_codex_hook_config_is_added_when_hook_enabled(tmp_path: Path) -> None:
     session = PtySession(work_dir=str(tmp_path), tool="codex")
     session._codex_hook_enabled = True
@@ -115,6 +123,75 @@ def test_codex_hook_config_is_added_when_hook_enabled(tmp_path: Path) -> None:
     assert "features.codex_hooks=true" in args
     assert any("hooks.PermissionRequest" in arg for arg in args)
     assert args[-2:] == ["--cd", str(tmp_path.resolve())]
+
+
+def test_codex_yolo_initial_launch_adds_bypass_flag(tmp_path: Path) -> None:
+    session = PtySession(work_dir=str(tmp_path), tool="codex", yolo_mode=True)
+
+    args = session._build_tool_args(["codex"], resume=False)
+
+    assert args == [
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--cd",
+        str(tmp_path.resolve()),
+    ]
+
+
+def test_codex_yolo_resume_adds_bypass_before_resume(tmp_path: Path) -> None:
+    session = PtySession(
+        work_dir=str(tmp_path),
+        tool="codex",
+        resume_token="codex-session",
+        yolo_mode=True,
+    )
+
+    args = session._build_tool_args(["codex"], resume=True)
+
+    assert args == [
+        "codex",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--cd",
+        str(tmp_path.resolve()),
+        "resume",
+        "codex-session",
+    ]
+
+
+def test_claude_yolo_launch_adds_skip_permissions_flag(tmp_path: Path) -> None:
+    session = PtySession(
+        work_dir=str(tmp_path),
+        tool="claude",
+        resume_token="claude-session",
+        yolo_mode=True,
+    )
+
+    args = session._build_tool_args(["claude"], resume=False)
+
+    assert args == [
+        "claude",
+        "--dangerously-skip-permissions",
+        "--session-id",
+        "claude-session",
+    ]
+
+
+def test_claude_yolo_resume_adds_skip_permissions_flag(tmp_path: Path) -> None:
+    session = PtySession(
+        work_dir=str(tmp_path),
+        tool="claude",
+        resume_token="claude-session",
+        yolo_mode=True,
+    )
+
+    args = session._build_tool_args(["claude"], resume=True)
+
+    assert args == [
+        "claude",
+        "--dangerously-skip-permissions",
+        "--resume",
+        "claude-session",
+    ]
 
 
 def test_codex_initial_launch_can_attach_image_and_prompt(tmp_path: Path) -> None:

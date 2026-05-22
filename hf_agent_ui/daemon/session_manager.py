@@ -32,6 +32,7 @@ class SessionManager:
         launch_mode: str = "local",
         launch_command: str | None = None,
         launch_label: str | None = None,
+        yolo_mode: bool = False,
         worktree: Mapping[str, Any] | None = None,
         label: str | None = None,
     ) -> PtySession:
@@ -52,6 +53,7 @@ class SessionManager:
                 launch_mode=launch_mode,
                 launch_command=launch_command,
                 launch_label=launch_label,
+                yolo_mode=yolo_mode,
                 worktree=worktree_metadata,
                 label=label,
             )
@@ -202,6 +204,7 @@ class SessionManager:
                     launch_mode=record.get("launch_mode", "local"),
                     launch_command=record.get("launch_command"),
                     launch_label=record.get("launch_label"),
+                    yolo_mode=record.get("yolo_mode", False),
                     worktree=worktree_metadata_from_record(record.get("worktree")),
                     label=record.get("label"),
                     last_activity_at=record.get("last_activity_at"),
