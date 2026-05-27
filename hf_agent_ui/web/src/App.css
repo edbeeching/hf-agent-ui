@@ -98,7 +98,11 @@
 }
 
 .logout-link {
+  display: inline-flex;
   flex: 0 0 auto;
+  min-height: 20px;
+  align-items: center;
+  padding: 0 2px;
   color: #c9d1d9;
   font-size: 11px;
   font-weight: 600;
@@ -1410,6 +1414,15 @@
 
   .sidebar-title h1 {
     font-size: 17px;
+  }
+
+  .logout-link {
+    min-height: 32px;
+    padding: 0 8px;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    background: #21262d;
+    font-size: 12px;
   }
 
   .connection-badge {

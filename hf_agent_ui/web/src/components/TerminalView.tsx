@@ -43,22 +43,31 @@ export function TerminalView({
   const pendingPreviewUrlRef = useRef<string | null>(null)
   const followOutputRef = useRef(true)
   const layoutFrameRef = useRef<number | null>(null)
+  const visibleRef = useRef(visible)
   const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [mobileInput, setMobileInput] = useState('')
 
-  const scheduleTerminalLayout = useCallback((follow: boolean): void => {
+  const scheduleTerminalLayout = useCallback((follow: boolean, forceFollow = false): void => {
     if (!termRef.current || !fitRef.current) return
+    if (!visibleRef.current) {
+      if (layoutFrameRef.current !== null) {
+        window.cancelAnimationFrame(layoutFrameRef.current)
+        layoutFrameRef.current = null
+      }
+      return
+    }
     if (layoutFrameRef.current !== null) {
       window.cancelAnimationFrame(layoutFrameRef.current)
     }
     layoutFrameRef.current = window.requestAnimationFrame(() => {
       layoutFrameRef.current = null
+      if (!visibleRef.current) return
       fitRef.current?.fit()
       const term = termRef.current
       if (!term) return
-      if (follow) {
+      if (follow && (forceFollow || followOutputRef.current)) {
         scrollTerminalToBottom(term)
         followOutputRef.current = true
         setShowScrollButton(false)
@@ -67,6 +76,14 @@ export function TerminalView({
       }
     })
   }, [])
+
+  useEffect(() => {
+    visibleRef.current = visible
+    if (!visible && layoutFrameRef.current !== null) {
+      window.cancelAnimationFrame(layoutFrameRef.current)
+      layoutFrameRef.current = null
+    }
+  }, [visible])
 
   useEffect(() => {
     onInputRef.current = onInput
@@ -138,7 +155,7 @@ export function TerminalView({
     // Send keystrokes to the session
     term.onData((data) => {
       followOutputRef.current = true
-      scheduleTerminalLayout(true)
+      scheduleTerminalLayout(true, true)
       onInputRef.current(data)
     })
 
@@ -292,14 +309,14 @@ export function TerminalView({
   function handleScrollToBottom(): void {
     if (!termRef.current) return
     followOutputRef.current = true
-    scheduleTerminalLayout(true)
+    scheduleTerminalLayout(true, true)
     setShowScrollButton(false)
   }
 
   function sendTerminalInput(data: string): void {
     if (!data) return
     followOutputRef.current = true
-    scheduleTerminalLayout(true)
+    scheduleTerminalLayout(true, true)
     onInputRef.current(data)
   }
 
@@ -381,7 +398,9 @@ export function TerminalView({
             onKeyDown={handleMobileKeyDown}
             placeholder="Type command"
             autoCapitalize="none"
+            autoCorrect="off"
             autoComplete="off"
+            spellCheck={false}
           />
           <button type="button" onClick={handleMobileSend} disabled={!mobileInput}>
             Send
