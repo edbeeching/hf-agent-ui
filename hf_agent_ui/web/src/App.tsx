@@ -158,12 +158,15 @@ function App() {
       )}
       <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
-          <div>
+          <div className="sidebar-title-main">
             <h1>hf-agent-ui</h1>
             {auth.user && (
-              <a className="user-link" href={auth.logoutUrl} title="Sign out">
-                {auth.user.username}
-              </a>
+              <div className="user-row">
+                <span className="user-name" title={auth.user.username}>{auth.user.username}</span>
+                <a className="logout-link" href={auth.logoutUrl}>
+                  Logout
+                </a>
+              </div>
             )}
           </div>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
@@ -405,14 +408,6 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
         copied={copied === 'launch'}
         onCopy={() => copyCommand('launch', daemonCommand)}
       />
-      <button
-        type="button"
-        className="update-button"
-        disabled
-        title="Update from the Space UI will be enabled after the GitHub repo is public."
-      >
-        Update unavailable
-      </button>
       {SHOW_CLOUD_HOSTS && <HfCloudHostPanel daemons={daemons} />}
     </div>
   )
