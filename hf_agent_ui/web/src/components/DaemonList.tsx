@@ -38,6 +38,7 @@ interface ProjectGroup {
 interface EnvironmentGroup {
   key: EnvironmentKey
   label: string
+  daemons: Map<string, Daemon>
   projects: Map<string, ProjectGroup>
 }
 
@@ -218,11 +219,6 @@ function ProjectSection({
 }) {
   return (
     <div className="project-sessions">
-      {project.sessions.length === 0 && (
-        <div className="session-item empty-session">
-          <span>No active sessions</span>
-        </div>
-      )}
       {project.sessions.map(({ daemon, session }) => (
         <div
           key={`${daemon.id}-${session.id}`}
@@ -308,27 +304,29 @@ function groupDaemons(daemons: Daemon[], sessions: Map<string, SessionInfo[]>): 
     groups.set(key, {
       key,
       label: ENVIRONMENT_LABELS[key],
+      daemons: new Map(),
       projects: new Map(),
     })
   }
 
   for (const daemon of daemons) {
     const environment = deriveEnvironment(daemon)
+    const environmentGroup = groups.get(environment)!
     const daemonSessions = sessions.get(daemon.id) || []
+    environmentGroup.daemons.set(daemon.id, daemon)
 
     if (daemonSessions.length === 0) {
-      addDaemonToProject(groups.get(environment)!, 'No project', daemon)
       continue
     }
 
     for (const session of daemonSessions) {
-      addSessionToProject(groups.get(environment)!, projectNameForSession(session), daemon, session)
+      addSessionToProject(environmentGroup, projectNameForSession(session), daemon, session)
     }
   }
 
   return ENVIRONMENT_ORDER
     .map(key => groups.get(key)!)
-    .filter(group => group.projects.size > 0)
+    .filter(group => group.daemons.size > 0)
 }
 
 function addDaemonToProject(
@@ -424,13 +422,7 @@ function inputBadgeLabel(kind: SessionInfo['needs_input_kind']): string {
 }
 
 function environmentDaemons(environment: EnvironmentGroup): Daemon[] {
-  const daemons = new Map<string, Daemon>()
-  for (const project of environment.projects.values()) {
-    for (const daemon of project.daemons.values()) {
-      daemons.set(daemon.id, daemon)
-    }
-  }
-  return [...daemons.values()]
+  return [...environment.daemons.values()]
 }
 
 function statusClass(session: SessionInfo): string {
