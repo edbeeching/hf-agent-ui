@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ensureUiTokenCookie, initializeUiTokenFromUrl, uiAuthFetch, uiWebSocketUrl } from '../auth'
 
 type JsonObject = Record<string, unknown>
+const AGENT_WORKING_WINDOW_MS = 20_000
+const WORKTREE_LIST_TIMEOUT_MS = 10_000
 
 initializeUiTokenFromUrl()
 
@@ -11,6 +13,63 @@ export interface LaunchOptions {
   launchMode: LaunchMode
   launchCommand?: string
   launchLabel?: string
+  yoloMode?: boolean
+}
+
+export interface CreateWorktreeOptions {
+  enabled: true
+  mode?: 'create'
+  sourceDir: string
+  branch: string
+  startPoint?: string
+}
+
+export interface ExistingWorktreeOptions {
+  enabled: true
+  mode: 'existing'
+  sourceDir: string
+  worktreeRoot: string
+}
+
+export type WorktreeOptions = CreateWorktreeOptions | ExistingWorktreeOptions
+
+export interface SessionWorktreeInfo {
+  source_dir: string
+  repo_root: string
+  worktree_root: string
+  branch: string
+  start_point: string
+  managed: boolean
+}
+
+export interface WorktreeListItem {
+  source_dir: string
+  repo_root: string
+  worktree_root: string
+  work_dir: string
+  branch: string
+  start_point: string
+  available: boolean
+  unavailable_reason: string | null
+}
+
+export interface WorktreeListResult {
+  sourceDir: string
+  worktrees: WorktreeListItem[]
+  loading: boolean
+  error: string | null
+  requestId: string | null
+}
+
+export type AgentState = 'blocked' | 'working' | 'done' | 'idle' | 'unknown'
+
+export interface SessionGitInfo {
+  branch: string | null
+  dirty: boolean
+  ahead: number | null
+  behind: number | null
+  is_worktree: boolean
+  repo_root: string
 }
 
 export interface SessionImagePayload {
@@ -36,6 +95,11 @@ export interface SessionInfo {
   tool: string
   mode: 'pty'
   created_at: string
+  label: string | null
+  agent_state: AgentState
+  last_activity_at: string | null
+  last_seen_at: string | null
+  done_since: string | null
   needs_input: boolean
   needs_input_reason: string | null
   needs_input_kind: InputRequiredKind | null
@@ -46,15 +110,26 @@ export interface SessionInfo {
   launch_mode: LaunchMode
   launch_command: string | null
   launch_label: string | null
+  yolo_mode: boolean
+  worktree: SessionWorktreeInfo | null
+  git: SessionGitInfo | null
 }
 
 export type InputRequiredKind = 'permission' | 'confirmation' | 'auth' | 'prompt'
+
+export interface AgentUiError {
+  message: string
+  requestType: string | null
+  daemonId: string | null
+}
 
 interface AgentUiState {
   connected: boolean
   daemons: Daemon[]
   sessions: Map<string, SessionInfo[]>
+  worktreeLists: Map<string, WorktreeListResult>
   ptyOutput: Map<string, string[]>  // sessionId -> raw terminal output chunks
+  lastError: AgentUiError | null
 }
 
 interface ServerMessage {
@@ -71,6 +146,10 @@ interface ServerMessage {
   message?: string
   detectedAt?: string
   status?: string
+  requestType?: string
+  requestId?: string
+  sourceDir?: string
+  worktrees?: unknown[]
 }
 
 interface InputRequiredUpdate {
@@ -84,11 +163,14 @@ interface InputRequiredUpdate {
 
 export function useAgentUi(enabled = true) {
   const wsRef = useRef<WebSocket | null>(null)
+  const worktreeListTimeoutsRef = useRef<Map<string, { requestId: string; timeoutId: number }>>(new Map())
   const [state, setState] = useState<AgentUiState>({
     connected: false,
     daemons: [],
     sessions: new Map(),
+    worktreeLists: new Map(),
     ptyOutput: new Map(),
+    lastError: null,
   })
 
   const fetchDaemons = useCallback(async () => {
@@ -104,7 +186,15 @@ export function useAgentUi(enabled = true) {
             sessions.delete(daemonId)
           }
         }
-        return { ...s, daemons, sessions }
+        const worktreeLists = new Map(s.worktreeLists)
+        for (const key of worktreeLists.keys()) {
+          const daemonId = key.split('\0', 1)[0]
+          if (!daemonIds.has(daemonId)) {
+            worktreeLists.delete(key)
+            clearWorktreeListTimeout(worktreeListTimeoutsRef.current, key)
+          }
+        }
+        return { ...s, daemons, sessions, worktreeLists }
       })
     } catch {
       // Hub not available
@@ -113,12 +203,7 @@ export function useAgentUi(enabled = true) {
 
   const updateSessionStatus = useCallback((sessionId: string, status: string) => {
     setState(s => {
-      const sessions = new Map(s.sessions)
-      for (const [did, list] of sessions) {
-        sessions.set(did, list.map(sess =>
-          sess.id === sessionId ? { ...sess, status } : sess
-        ))
-      }
+      const sessions = updateSession(s.sessions, sessionId, session => refreshAgentState({ ...session, status }))
       return { ...s, sessions }
     })
   }, [])
@@ -135,6 +220,7 @@ export function useAgentUi(enabled = true) {
           sess.id === sessionId
             ? {
               ...sess,
+              agent_state: needsInput ? 'blocked' : refreshAgentState({ ...sess, needs_input: false }).agent_state,
               needs_input: needsInput,
               needs_input_reason: needsInput ? update.reason || 'Human input required' : null,
               needs_input_kind: needsInput ? normalizeInputRequiredKind(update.kind) : null,
@@ -162,6 +248,32 @@ export function useAgentUi(enabled = true) {
             .filter(session => session.mode === 'pty')
             .map(normalizeSession))
           return { ...s, sessions }
+        })
+        break
+      }
+
+      case 'worktrees.list': {
+        if (!daemonId || typeof msg.sourceDir !== 'string') return
+        const key = worktreeListKey(daemonId, msg.sourceDir || '.')
+        const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
+        const pending = worktreeListTimeoutsRef.current.get(key)
+        if (requestId && pending && pending.requestId !== requestId) return
+        clearWorktreeListTimeout(worktreeListTimeoutsRef.current, key, requestId || undefined)
+        const worktrees = Array.isArray(msg.worktrees)
+          ? msg.worktrees.map(normalizeWorktreeListItem).filter((item): item is WorktreeListItem => Boolean(item))
+          : []
+        setState(s => {
+          const worktreeLists = new Map(s.worktreeLists)
+          const previous = worktreeLists.get(key)
+          if (requestId && previous?.loading && previous.requestId && previous.requestId !== requestId) return s
+          worktreeLists.set(key, {
+            sourceDir: msg.sourceDir || '.',
+            worktrees,
+            loading: false,
+            error: null,
+            requestId: null,
+          })
+          return { ...s, worktreeLists }
         })
         break
       }
@@ -197,11 +309,18 @@ export function useAgentUi(enabled = true) {
 
       case 'pty.output': {
         if (!sessionId || typeof msg.data !== 'string') return
+        const activityAt = new Date().toISOString()
         setState(s => {
           const ptyOutput = new Map(s.ptyOutput)
           const chunks = ptyOutput.get(sessionId) || []
           ptyOutput.set(sessionId, [...chunks, msg.data as string])
-          return { ...s, ptyOutput }
+          const sessions = updateSession(s.sessions, sessionId, session => ({
+            ...session,
+            agent_state: session.needs_input ? 'blocked' : 'working',
+            last_activity_at: activityAt,
+            done_since: null,
+          }))
+          return { ...s, sessions, ptyOutput }
         })
         break
       }
@@ -219,7 +338,9 @@ export function useAgentUi(enabled = true) {
       }
 
       case 'session.paused':
-      case 'session.resumed': {
+      case 'session.resumed':
+      case 'session.renamed':
+      case 'session.updated': {
         if (!daemonId || !sessionId || !msg.session) return
         const session = normalizeSession(msg.session)
         setState(s => {
@@ -276,8 +397,63 @@ export function useAgentUi(enabled = true) {
         })
         break
       }
+
+      case 'error': {
+        const requestType = typeof msg.requestType === 'string' ? msg.requestType : null
+        const rawMessage = typeof msg.message === 'string' && msg.message.trim()
+          ? msg.message.trim()
+          : 'Unknown error'
+        if (requestType === 'worktrees.list' && daemonId && typeof msg.sourceDir === 'string') {
+          const key = worktreeListKey(daemonId, msg.sourceDir || '.')
+          const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
+          const pending = worktreeListTimeoutsRef.current.get(key)
+          if (requestId && pending && pending.requestId !== requestId) break
+          clearWorktreeListTimeout(worktreeListTimeoutsRef.current, key, requestId || undefined)
+          setState(s => {
+            const worktreeLists = new Map(s.worktreeLists)
+            const previous = worktreeLists.get(key)
+            if (requestId && previous?.loading && previous.requestId && previous.requestId !== requestId) return s
+            worktreeLists.set(key, {
+              sourceDir: msg.sourceDir || '.',
+              worktrees: previous?.worktrees || [],
+              loading: false,
+              error: rawMessage,
+              requestId: null,
+            })
+            return { ...s, worktreeLists }
+          })
+          break
+        }
+        const message = requestType === 'pty.create'
+          ? `Could not create session: ${rawMessage}`
+          : rawMessage
+        setState(s => ({
+          ...s,
+          lastError: {
+            message,
+            requestType,
+            daemonId: typeof daemonId === 'string' ? daemonId : null,
+          },
+        }))
+        break
+      }
     }
   }, [updateSessionInputRequired, updateSessionStatus])
+
+  useEffect(() => {
+    if (!enabled) return
+    const interval = setInterval(() => {
+      setState(s => ({ ...s, sessions: refreshAgentStates(s.sessions) }))
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [enabled])
+
+  useEffect(() => () => {
+    for (const { timeoutId } of worktreeListTimeoutsRef.current.values()) {
+      window.clearTimeout(timeoutId)
+    }
+    worktreeListTimeoutsRef.current.clear()
+  }, [])
 
   useEffect(() => {
     if (!enabled) {
@@ -344,9 +520,12 @@ export function useAgentUi(enabled = true) {
     workDir: string,
     tool: string = 'codex',
     launch: LaunchOptions = { launchMode: 'local' },
+    worktree?: WorktreeOptions,
+    label?: string | null,
     cols: number = 120,
     rows: number = 40,
   ) => {
+    setState(s => ({ ...s, lastError: null }))
     send({
       type: 'pty.create',
       daemonId,
@@ -357,7 +536,46 @@ export function useAgentUi(enabled = true) {
       launchMode: launch.launchMode,
       launchCommand: launch.launchCommand,
       launchLabel: launch.launchLabel,
+      ...(launch.yoloMode === true ? { yoloMode: true } : {}),
+      worktree,
+      label,
     })
+  }, [send])
+
+  const listWorktrees = useCallback((daemonId: string, sourceDir: string) => {
+    const normalizedSourceDir = sourceDir.trim() || '.'
+    const key = worktreeListKey(daemonId, normalizedSourceDir)
+    if (worktreeListTimeoutsRef.current.has(key)) return
+    const requestId = newRequestId()
+    setState(s => {
+      const worktreeLists = new Map(s.worktreeLists)
+      const previous = worktreeLists.get(key)
+      worktreeLists.set(key, {
+        sourceDir: normalizedSourceDir,
+        worktrees: previous?.worktrees || [],
+        loading: true,
+        error: null,
+        requestId,
+      })
+      return { ...s, worktreeLists }
+    })
+    const timeoutId = window.setTimeout(() => {
+      worktreeListTimeoutsRef.current.delete(key)
+      setState(s => {
+        const worktreeLists = new Map(s.worktreeLists)
+        const current = worktreeLists.get(key)
+        if (!current?.loading || current.requestId !== requestId) return s
+        worktreeLists.set(key, {
+          ...current,
+          loading: false,
+          error: 'Timed out listing worktrees.',
+          requestId: null,
+        })
+        return { ...s, worktreeLists }
+      })
+    }, WORKTREE_LIST_TIMEOUT_MS)
+    worktreeListTimeoutsRef.current.set(key, { requestId, timeoutId })
+    send({ type: 'worktrees.list', daemonId, sourceDir: normalizedSourceDir, requestId })
   }, [send])
 
   const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string) => {
@@ -412,6 +630,23 @@ export function useAgentUi(enabled = true) {
     send({ type: 'session.resume', daemonId, sessionId })
   }, [send])
 
+  const renameSession = useCallback((daemonId: string, sessionId: string, label: string | null) => {
+    send({ type: 'session.rename', daemonId, sessionId, label })
+  }, [send])
+
+  const markSessionSeen = useCallback((daemonId: string, sessionId: string) => {
+    const seenAt = new Date().toISOString()
+    setState(s => ({
+      ...s,
+      sessions: updateSession(s.sessions, sessionId, session => normalizeSeenSession({
+        ...session,
+        last_seen_at: seenAt,
+        done_since: null,
+      })),
+    }))
+    send({ type: 'session.mark_seen', daemonId, sessionId })
+  }, [send])
+
   const pauseDaemon = useCallback((daemonId: string) => {
     send({ type: 'app.pause', daemonId })
   }, [send])
@@ -428,9 +663,14 @@ export function useAgentUi(enabled = true) {
     send({ type: 'session.subscribe', daemonId, sessionId })
   }, [send])
 
+  const dismissError = useCallback(() => {
+    setState(s => ({ ...s, lastError: null }))
+  }, [])
+
   return {
     ...state,
     createPtySession,
+    listWorktrees,
     sendPtyInput,
     sendSessionImage,
     resizePty,
@@ -438,11 +678,14 @@ export function useAgentUi(enabled = true) {
     removeSession,
     pauseSession,
     resumeSession,
+    renameSession,
+    markSessionSeen,
     pauseDaemon,
     resumeDaemon,
     listSessions,
     subscribeSession,
     fetchDaemons,
+    dismissError,
   }
 }
 
@@ -450,6 +693,11 @@ function normalizeSession(session: SessionInfo): SessionInfo {
   return {
     ...session,
     mode: 'pty',
+    label: typeof session.label === 'string' && session.label.trim() ? session.label.trim() : null,
+    agent_state: normalizeAgentState(session.agent_state, session),
+    last_activity_at: normalizeTimestamp(session.last_activity_at),
+    last_seen_at: normalizeTimestamp(session.last_seen_at),
+    done_since: normalizeTimestamp(session.done_since),
     needs_input: Boolean(session.needs_input),
     needs_input_reason: session.needs_input_reason || null,
     needs_input_kind: normalizeInputRequiredKind(session.needs_input_kind),
@@ -460,7 +708,14 @@ function normalizeSession(session: SessionInfo): SessionInfo {
     launch_mode: session.launch_mode === 'custom' ? 'custom' : 'local',
     launch_command: typeof session.launch_command === 'string' ? session.launch_command : null,
     launch_label: typeof session.launch_label === 'string' ? session.launch_label : null,
+    yolo_mode: supportsYoloMode(session.tool) && session.yolo_mode === true,
+    worktree: normalizeWorktree(session.worktree),
+    git: normalizeGit(session.git),
   }
+}
+
+export function supportsYoloMode(tool: unknown): boolean {
+  return tool === 'claude' || tool === 'codex'
 }
 
 function upsertSession(list: SessionInfo[], session: SessionInfo): SessionInfo[] {
@@ -475,4 +730,163 @@ function normalizeInputRequiredKind(kind: unknown): InputRequiredKind | null {
     return kind
   }
   return null
+}
+
+function normalizeAgentState(state: unknown, session: Partial<SessionInfo>): AgentState {
+  if (session.needs_input) return 'blocked'
+  if (state === 'blocked' || state === 'working' || state === 'done' || state === 'idle' || state === 'unknown') {
+    return state
+  }
+  if (session.status === 'running') return 'idle'
+  return 'unknown'
+}
+
+function normalizeTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const time = Date.parse(value)
+  if (Number.isNaN(time)) return null
+  return new Date(time).toISOString()
+}
+
+function normalizeWorktree(worktree: unknown): SessionWorktreeInfo | null {
+  if (!worktree || typeof worktree !== 'object') return null
+  const candidate = worktree as Record<string, unknown>
+  if (
+    typeof candidate.source_dir !== 'string'
+    || typeof candidate.repo_root !== 'string'
+    || typeof candidate.worktree_root !== 'string'
+    || typeof candidate.branch !== 'string'
+  ) {
+    return null
+  }
+  return {
+    source_dir: candidate.source_dir,
+    repo_root: candidate.repo_root,
+    worktree_root: candidate.worktree_root,
+    branch: candidate.branch,
+    start_point: typeof candidate.start_point === 'string' ? candidate.start_point : 'HEAD',
+    managed: typeof candidate.managed === 'boolean' ? candidate.managed : true,
+  }
+}
+
+function normalizeWorktreeListItem(value: unknown): WorktreeListItem | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.source_dir !== 'string'
+    || typeof candidate.repo_root !== 'string'
+    || typeof candidate.worktree_root !== 'string'
+    || typeof candidate.work_dir !== 'string'
+    || typeof candidate.branch !== 'string'
+    || typeof candidate.start_point !== 'string'
+  ) {
+    return null
+  }
+  return {
+    source_dir: candidate.source_dir,
+    repo_root: candidate.repo_root,
+    worktree_root: candidate.worktree_root,
+    work_dir: candidate.work_dir,
+    branch: candidate.branch,
+    start_point: candidate.start_point,
+    available: Boolean(candidate.available),
+    unavailable_reason: typeof candidate.unavailable_reason === 'string' ? candidate.unavailable_reason : null,
+  }
+}
+
+function normalizeGit(git: unknown): SessionGitInfo | null {
+  if (!git || typeof git !== 'object') return null
+  const candidate = git as Record<string, unknown>
+  if (typeof candidate.repo_root !== 'string') return null
+  return {
+    branch: typeof candidate.branch === 'string' && candidate.branch ? candidate.branch : null,
+    dirty: Boolean(candidate.dirty),
+    ahead: typeof candidate.ahead === 'number' ? candidate.ahead : null,
+    behind: typeof candidate.behind === 'number' ? candidate.behind : null,
+    is_worktree: Boolean(candidate.is_worktree),
+    repo_root: candidate.repo_root,
+  }
+}
+
+export function worktreeListKey(daemonId: string, sourceDir: string): string {
+  return `${daemonId}\0${sourceDir.trim() || '.'}`
+}
+
+function clearWorktreeListTimeout(
+  timeouts: Map<string, { requestId: string; timeoutId: number }>,
+  key: string,
+  requestId?: string,
+) {
+  const pending = timeouts.get(key)
+  if (!pending || (requestId && pending.requestId !== requestId)) return
+  window.clearTimeout(pending.timeoutId)
+  timeouts.delete(key)
+}
+
+function newRequestId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+function updateSession(
+  sessions: Map<string, SessionInfo[]>,
+  sessionId: string,
+  updater: (session: SessionInfo) => SessionInfo,
+): Map<string, SessionInfo[]> {
+  const next = new Map(sessions)
+  for (const [daemonId, list] of next) {
+    next.set(daemonId, list.map(session => session.id === sessionId ? updater(session) : session))
+  }
+  return next
+}
+
+function refreshAgentStates(sessions: Map<string, SessionInfo[]>): Map<string, SessionInfo[]> {
+  let changed = false
+  const next = new Map<string, SessionInfo[]>()
+  for (const [daemonId, list] of sessions) {
+    const updated = list.map(session => {
+      const refreshed = refreshAgentState(session)
+      changed = changed || refreshed !== session
+      return refreshed
+    })
+    next.set(daemonId, updated)
+  }
+  return changed ? next : sessions
+}
+
+function refreshAgentState(session: SessionInfo): SessionInfo {
+  if (session.needs_input) {
+    return session.agent_state === 'blocked' ? session : { ...session, agent_state: 'blocked' }
+  }
+  const activityTime = session.last_activity_at ? Date.parse(session.last_activity_at) : NaN
+  if (Number.isNaN(activityTime)) {
+    const idleState: AgentState = session.status === 'running' || session.status === 'paused' || session.status === 'stopped'
+      ? 'idle'
+      : 'unknown'
+    return session.agent_state === idleState ? session : { ...session, agent_state: idleState }
+  }
+  const seenTime = session.last_seen_at ? Date.parse(session.last_seen_at) : NaN
+  const unseen = Number.isNaN(seenTime) || seenTime < activityTime
+  const recent = Date.now() - activityTime <= AGENT_WORKING_WINDOW_MS
+  let agentState: AgentState = 'idle'
+  let doneSince = session.done_since
+  if (session.status === 'running' && recent) {
+    agentState = 'working'
+    doneSince = null
+  } else if (unseen) {
+    agentState = 'done'
+    doneSince = doneSince || session.last_activity_at
+  }
+  if (session.agent_state === agentState && session.done_since === doneSince) return session
+  return { ...session, agent_state: agentState, done_since: doneSince }
+}
+
+function normalizeSeenSession(session: SessionInfo): SessionInfo {
+  if (session.needs_input) return { ...session, agent_state: 'blocked' }
+  if (session.status === 'running' && session.last_activity_at) {
+    const activityTime = Date.parse(session.last_activity_at)
+    if (!Number.isNaN(activityTime) && Date.now() - activityTime <= AGENT_WORKING_WINDOW_MS) {
+      return { ...session, agent_state: 'working', done_since: null }
+    }
+  }
+  return { ...session, agent_state: session.status === 'running' || session.status === 'paused' || session.status === 'stopped' ? 'idle' : 'unknown', done_since: null }
 }

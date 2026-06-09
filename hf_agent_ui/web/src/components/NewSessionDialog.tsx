@@ -1,11 +1,15 @@
-import { useState } from 'react'
-import type { Daemon, LaunchMode, LaunchOptions } from '../hooks/useAgentUi'
+import { useEffect, useState } from 'react'
+import { supportsYoloMode } from '../hooks/useAgentUi'
+import type { Daemon, LaunchMode, LaunchOptions, WorktreeListResult, WorktreeOptions } from '../hooks/useAgentUi'
 
 const CUSTOM_LAUNCH_STORAGE_KEY = 'hf-agent-ui.customLaunch'
+type WorktreeMode = 'none' | 'create' | 'existing'
 
 interface Props {
   daemons: Daemon[]
   getRecentWorkDirs: (daemon: Daemon | null) => string[]
+  getWorktreeList: (daemonId: string, sourceDir: string) => WorktreeListResult | null
+  onListWorktrees: (daemonId: string, sourceDir: string) => void
   onRemoveRecentWorkDir: (daemon: Daemon, workDir: string) => void
   onClose: () => void
   onCreate: (
@@ -13,12 +17,16 @@ interface Props {
     workDir: string,
     tool: string,
     launch: LaunchOptions,
+    worktree?: WorktreeOptions,
+    label?: string | null,
   ) => void
 }
 
 export function NewSessionDialog({
   daemons,
   getRecentWorkDirs,
+  getWorktreeList,
+  onListWorktrees,
   onRemoveRecentWorkDir,
   onClose,
   onCreate,
@@ -29,16 +37,46 @@ export function NewSessionDialog({
   const storedCustomLaunch = readCustomLaunch()
   const [daemonId, setDaemonId] = useState(defaultDaemonId)
   const [tool, setTool] = useState('codex')
+  const [sessionLabel, setSessionLabel] = useState('')
   const [workDir, setWorkDir] = useState(getRecentWorkDirs(defaultDaemon)[0] || '~')
   const [launchMode, setLaunchMode] = useState<LaunchMode>('local')
   const [launchLabel, setLaunchLabel] = useState(storedCustomLaunch.label)
   const [launchCommand, setLaunchCommand] = useState(storedCustomLaunch.command)
+  const [yoloMode, setYoloMode] = useState(false)
+  const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>('none')
+  const [worktreeBranch, setWorktreeBranch] = useState(() => defaultWorktreeBranch('codex'))
+  const [worktreeBranchTouched, setWorktreeBranchTouched] = useState(false)
+  const [worktreeStartPoint, setWorktreeStartPoint] = useState('HEAD')
+  const [selectedWorktree, setSelectedWorktree] = useState<{
+    daemonId: string
+    sourceDir: string
+    root: string
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const selectedDaemonId = connectedDaemons.some(daemon => daemon.id === daemonId)
     ? daemonId
     : defaultDaemonId
   const selectedDaemon = connectedDaemons.find(daemon => daemon.id === selectedDaemonId) || null
   const recentWorkDirs = getRecentWorkDirs(selectedDaemon)
+  const sourceDir = workDir.trim() || '.'
+  const worktreeList = worktreeMode === 'existing' && selectedDaemonId
+    ? getWorktreeList(selectedDaemonId, sourceDir)
+    : null
+  const selectedWorktreeRoot = selectedWorktree?.daemonId === selectedDaemonId
+    && selectedWorktree.sourceDir === sourceDir
+    ? selectedWorktree.root
+    : ''
+  const selectedWorktreeRow = worktreeList?.worktrees.find(worktree =>
+    worktree.worktree_root === selectedWorktreeRoot && worktree.available
+  ) || null
+
+  useEffect(() => {
+    if (worktreeMode !== 'existing' || !selectedDaemonId || !sourceDir) return
+    const timeout = window.setTimeout(() => {
+      onListWorktrees(selectedDaemonId, sourceDir)
+    }, 250)
+    return () => window.clearTimeout(timeout)
+  }, [worktreeMode, selectedDaemonId, sourceDir, onListWorktrees])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -46,9 +84,21 @@ export function NewSessionDialog({
       setError('Selected agent host is no longer available.')
       return
     }
-    const launch = launchOptions(launchMode, launchLabel, launchCommand)
+    const launch = launchOptions(launchMode, launchLabel, launchCommand, tool, yoloMode)
     if (launch.launchMode === 'custom' && !launch.launchCommand?.includes('{command}')) {
       setError('Custom launch command must include {command}.')
+      return
+    }
+    const existingWorktreeRoot = worktreeMode === 'existing'
+      ? selectedWorktreeRow?.worktree_root || ''
+      : selectedWorktreeRoot
+    const worktree = worktreeOptions(worktreeMode, workDir, worktreeBranch, worktreeStartPoint, existingWorktreeRoot)
+    if (worktreeMode === 'create' && !worktree) {
+      setError('Worktree branch is required.')
+      return
+    }
+    if (worktreeMode === 'existing' && !worktree) {
+      setError('Select an existing worktree.')
       return
     }
     if (launch.launchMode === 'custom') {
@@ -57,7 +107,7 @@ export function NewSessionDialog({
         command: launch.launchCommand || '',
       })
     }
-    onCreate(selectedDaemonId, workDir, tool, launch)
+    onCreate(selectedDaemonId, workDir, tool, launch, worktree, normalizeSessionLabel(sessionLabel))
     onClose()
   }
 
@@ -93,12 +143,98 @@ export function NewSessionDialog({
           )}
           <label>
             Tool
-            <select value={tool} onChange={e => setTool(e.target.value)}>
+            <select
+              value={tool}
+              onChange={e => {
+                const nextTool = e.target.value
+                setTool(nextTool)
+                if (!supportsYoloMode(nextTool)) {
+                  setYoloMode(false)
+                }
+                if (!worktreeBranchTouched) {
+                  setWorktreeBranch(defaultWorktreeBranch(nextTool))
+                }
+              }}
+            >
               <option value="codex">Codex CLI</option>
               <option value="claude">Claude Code</option>
               <option value="bash">Bash terminal</option>
             </select>
           </label>
+          {supportsYoloMode(tool) && (
+            <>
+              <label className="checkbox-label" title="Skip approval and sandbox permission prompts for this session">
+                <input
+                  type="checkbox"
+                  checked={yoloMode}
+                  aria-describedby="yolo-mode-help"
+                  onChange={e => {
+                    setYoloMode(e.target.checked)
+                    setError(null)
+                  }}
+                />
+                YOLO mode
+              </label>
+              <div id="yolo-mode-help" className="field-help warning">
+                Skips approval and sandbox prompts for this session.
+              </div>
+            </>
+          )}
+          <label>
+            Session label
+            <input
+              type="text"
+              value={sessionLabel}
+              onChange={e => setSessionLabel(e.target.value)}
+              placeholder="auth fix, tests, review"
+              maxLength={120}
+            />
+          </label>
+          <label>
+            Worktree
+            <select
+              value={worktreeMode}
+              onChange={e => {
+                setWorktreeMode(e.target.value as WorktreeMode)
+                setSelectedWorktree(null)
+                setError(null)
+              }}
+            >
+              <option value="none">None</option>
+              <option value="create">Create new</option>
+              <option value="existing">Use existing</option>
+            </select>
+          </label>
+          {worktreeMode === 'create' && (
+            <>
+              <label>
+                Branch
+                <input
+                  type="text"
+                  value={worktreeBranch}
+                  onChange={e => {
+                    setWorktreeBranch(e.target.value)
+                    setWorktreeBranchTouched(true)
+                    setError(null)
+                  }}
+                  placeholder="agent/codex-20260507-120000"
+                  required
+                />
+              </label>
+              <label>
+                Base ref
+                <input
+                  type="text"
+                  value={worktreeStartPoint}
+                  onChange={e => {
+                    setWorktreeStartPoint(e.target.value)
+                    setError(null)
+                  }}
+                  placeholder="HEAD"
+                />
+              </label>
+            </>
+          )}
           <label>
             Launch
             <select
@@ -139,7 +275,7 @@ export function NewSessionDialog({
             </>
           )}
           <label>
-            Working directory
+            {worktreeMode === 'none' ? 'Working directory' : 'Source directory'}
             {recentWorkDirs.length > 0 && (
               <div className="recent-dir-list" aria-label="Recent directories">
                 {recentWorkDirs.map(dir => (
@@ -177,15 +313,28 @@ export function NewSessionDialog({
               value={workDir}
               onChange={e => {
                 setWorkDir(e.target.value)
+                setError(null)
               }}
               placeholder="/path/to/project"
               required
             />
           </label>
+          {worktreeMode === 'existing' && (
+            <WorktreePicker
+              result={worktreeList}
+              selectedRoot={selectedWorktreeRoot}
+              onSelect={root => {
+                setSelectedWorktree({ daemonId: selectedDaemonId, sourceDir, root })
+                setError(null)
+              }}
+            />
+          )}
           {error && <div className="dialog-error">{error}</div>}
           <div className="dialog-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button type="submit" disabled={!selectedDaemon}>Create</button>
+            <button type="submit" disabled={!selectedDaemon || (worktreeMode === 'existing' && !selectedWorktreeRow)}>
+              Create
+            </button>
           </div>
         </form>
       </div>
@@ -197,15 +346,125 @@ function launchOptions(
   launchMode: LaunchMode,
   launchLabel: string,
   launchCommand: string,
+  tool: string,
+  yoloMode: boolean,
 ): LaunchOptions {
+  const yolo = supportsYoloMode(tool) && yoloMode
   if (launchMode !== 'custom') {
-    return { launchMode: 'local' }
+    return yolo ? { launchMode: 'local', yoloMode: true } : { launchMode: 'local' }
   }
-  return {
+  const launch: LaunchOptions = {
     launchMode: 'custom',
     launchLabel: launchLabel.trim() || 'custom',
     launchCommand: launchCommand.trim(),
   }
+  if (yolo) {
+    launch.yoloMode = true
+  }
+  return launch
+}
+
+function worktreeOptions(
+  mode: WorktreeMode,
+  sourceDir: string,
+  branch: string,
+  startPoint: string,
+  worktreeRoot: string,
+): WorktreeOptions | undefined {
+  if (mode === 'none') return undefined
+  if (mode === 'existing') {
+    const trimmedRoot = worktreeRoot.trim()
+    if (!trimmedRoot) return undefined
+    return {
+      enabled: true,
+      mode: 'existing',
+      sourceDir,
+      worktreeRoot: trimmedRoot,
+    }
+  }
+  const trimmedBranch = branch.trim()
+  if (!trimmedBranch) return undefined
+  const trimmedStartPoint = startPoint.trim()
+  return {
+    enabled: true,
+    mode: 'create',
+    sourceDir,
+    branch: trimmedBranch,
+    startPoint: trimmedStartPoint || undefined,
+  }
+}
+
+function WorktreePicker({
+  result,
+  selectedRoot,
+  onSelect,
+}: {
+  result: WorktreeListResult | null
+  selectedRoot: string
+  onSelect: (root: string) => void
+}) {
+  const worktrees = result?.worktrees || []
+  return (
+    <div className="worktree-picker" aria-label="Existing worktrees">
+      {!result && (
+        <div className="worktree-picker-status">Loading worktrees...</div>
+      )}
+      {result?.loading && worktrees.length === 0 && (
+        <div className="worktree-picker-status">Loading worktrees...</div>
+      )}
+      {result?.error && (
+        <div className="worktree-picker-status error">{result.error}</div>
+      )}
+      {!result?.loading && !result?.error && worktrees.length === 0 && (
+        <div className="worktree-picker-status">No linked worktrees found.</div>
+      )}
+      {worktrees.map(worktree => (
+        <button
+          type="button"
+          key={worktree.worktree_root}
+          className={`worktree-row ${selectedRoot === worktree.worktree_root ? 'selected' : ''}`}
+          disabled={!worktree.available}
+          aria-pressed={selectedRoot === worktree.worktree_root}
+          title={worktree.available ? worktree.work_dir : worktree.unavailable_reason || worktree.work_dir}
+          onClick={() => onSelect(worktree.worktree_root)}
+        >
+          <span className="worktree-row-main">
+            <span className="worktree-row-branch">{worktree.branch}</span>
+            <span className="worktree-row-path">{compactPath(worktree.worktree_root)}</span>
+          </span>
+          <span className={`worktree-row-status ${worktree.available ? 'available' : 'unavailable'}`}>
+            {worktree.available ? 'Ready' : 'Missing'}
+          </span>
+        </button>
+      ))}
+      {result?.loading && worktrees.length > 0 && (
+        <div className="worktree-picker-status">Refreshing...</div>
+      )}
+    </div>
+  )
+}
+
+function normalizeSessionLabel(label: string): string | null {
+  const trimmed = label.trim()
+  return trimmed || null
+}
+
+function defaultWorktreeBranch(tool: string): string {
+  const now = new Date()
+  const stamp = [
+    now.getFullYear(),
+    pad2(now.getMonth() + 1),
+    pad2(now.getDate()),
+  ].join('') + '-' + [
+    pad2(now.getHours()),
+    pad2(now.getMinutes()),
+    pad2(now.getSeconds()),
+  ].join('')
+  return `agent/${tool}-${stamp}`
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
 }
 
 function readCustomLaunch(): { label: string; command: string } {
@@ -232,4 +491,12 @@ function projectNameFromPath(path: string): string {
   if (!cleaned || cleaned === '~') return 'Home'
   const parts = cleaned.split(/[\\/]+/)
   return parts[parts.length - 1] || cleaned
+}
+
+function compactPath(path: string): string {
+  const trimmed = path.trim().replace(/[\\/]+$/, '')
+  if (!trimmed || trimmed === '~') return 'Home'
+  const parts = trimmed.split(/[\\/]+/).filter(Boolean)
+  if (parts.length <= 2) return trimmed
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }

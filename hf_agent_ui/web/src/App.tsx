@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useAgentUi } from './hooks/useAgentUi'
-import type { Daemon, SessionImagePayload } from './hooks/useAgentUi'
+import { supportsYoloMode, useAgentUi, worktreeListKey } from './hooks/useAgentUi'
+import type { Daemon, LaunchOptions, SessionImagePayload, SessionInfo, WorktreeListResult } from './hooks/useAgentUi'
 import { DaemonList } from './components/DaemonList'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -40,14 +40,20 @@ function App() {
     connected,
     daemons,
     sessions,
+    worktreeLists,
     ptyOutput,
+    lastError,
     createPtySession,
+    listWorktrees,
     sendPtyInput,
     sendSessionImage,
     resizePty,
     removeSession,
+    renameSession,
     listSessions,
     subscribeSession,
+    markSessionSeen,
+    dismissError,
   } = sw
   const [selected, setSelected] = useState<{ daemonId: string; sessionId: string } | null>(() => readStoredSelection())
   const [newSessionDaemonIds, setNewSessionDaemonIds] = useState<string[] | null>(null)
@@ -60,9 +66,9 @@ function App() {
   const activeSession = activeSelected
     ? (sessions.get(activeSelected.daemonId) || []).find(session => session.id === activeSelected.sessionId) || null
     : null
-  const inputRequiredCount = [...sessions.values()]
+  const attentionCount = [...sessions.values()]
     .flat()
-    .filter(session => session.needs_input).length
+    .filter(session => session.needs_input || session.agent_state === 'done').length
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
   const newSessionDaemons = newSessionDaemonIds
@@ -75,6 +81,11 @@ function App() {
   const removeRecentWorkDirForDaemon = useCallback((daemon: Daemon, workDir: string) => {
     setRecentWorkDirs(current => persistRecentWorkDirs(removeRecentWorkDir(current, daemon, workDir)))
   }, [])
+  const getWorktreeList = useCallback(
+    (daemonId: string, sourceDir: string): WorktreeListResult | null =>
+      worktreeLists.get(worktreeListKey(daemonId, sourceDir)) || null,
+    [worktreeLists],
+  )
 
   useEffect(() => {
     let disposed = false
@@ -121,11 +132,11 @@ function App() {
   }, [activeSelected, connected, subscribeSession])
 
   useEffect(() => {
-    document.title = inputRequiredCount > 0 ? `(${inputRequiredCount}) hf-agent-ui` : 'hf-agent-ui'
+    document.title = attentionCount > 0 ? `(${attentionCount}) hf-agent-ui` : 'hf-agent-ui'
     return () => {
       document.title = 'hf-agent-ui'
     }
-  }, [inputRequiredCount])
+  }, [attentionCount])
 
   if (!auth) {
     return <AuthScreen loading />
@@ -137,14 +148,25 @@ function App() {
 
   return (
     <div className="app">
+      {lastError && (
+        <div className="app-error-banner" role="alert">
+          <span>{lastError.message}</span>
+          <button type="button" onClick={dismissError} aria-label="Dismiss error">
+            x
+          </button>
+        </div>
+      )}
       <aside className={`sidebar ${activeMobileView === 'sessions' ? 'mobile-active' : ''}`}>
         <div className="sidebar-title">
-          <div>
+          <div className="sidebar-title-main">
             <h1>hf-agent-ui</h1>
             {auth.user && (
-              <a className="user-link" href={auth.logoutUrl} title="Sign out">
-                {auth.user.username}
-              </a>
+              <div className="user-row">
+                <span className="user-name" title={auth.user.username}>{auth.user.username}</span>
+                <a className="logout-link" href={auth.logoutUrl}>
+                  Logout
+                </a>
+              </div>
             )}
           </div>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
@@ -157,6 +179,7 @@ function App() {
           selectedSession={activeSelected}
           onSelectSession={(daemonId, sessionId) => {
             setSelected({ daemonId, sessionId })
+            markSessionSeen(daemonId, sessionId)
             setActiveMobileView('terminal')
           }}
           onNewSession={daemons => setNewSessionDaemonIds(daemons.map(daemon => daemon.id))}
@@ -168,6 +191,21 @@ function App() {
           }}
           onPauseSession={(daemonId, sessionId) => sw.pauseSession(daemonId, sessionId)}
           onResumeSession={(daemonId, sessionId) => sw.resumeSession(daemonId, sessionId)}
+          onRenameSession={(daemonId, sessionId, label) => renameSession(daemonId, sessionId, label)}
+          onDuplicateSession={(daemonId, session) => {
+            const preserveYolo = supportsYoloMode(session.tool) && session.yolo_mode
+              ? window.confirm('Duplicate this session with YOLO mode enabled? This skips approval and sandbox prompts.')
+              : false
+            createPtySession(
+              daemonId,
+              session.work_dir,
+              session.tool,
+              duplicateLaunchOptions(session, preserveYolo),
+              undefined,
+              session.label ? `${session.label} copy` : null,
+            )
+            setActiveMobileView('terminal')
+          }}
         />
         <ConnectDaemonPanel daemons={daemons} />
       </aside>
@@ -213,7 +251,7 @@ function App() {
           aria-current={activeMobileView === 'sessions' ? 'page' : undefined}
           onClick={() => setActiveMobileView('sessions')}
         >
-          {inputRequiredCount > 0 ? `Sessions (${inputRequiredCount})` : 'Sessions'}
+          {attentionCount > 0 ? `Sessions (${attentionCount})` : 'Sessions'}
         </button>
         <button
           type="button"
@@ -229,12 +267,14 @@ function App() {
         <NewSessionDialog
           daemons={newSessionDaemons}
           getRecentWorkDirs={getRecentWorkDirs}
+          getWorktreeList={getWorktreeList}
+          onListWorktrees={listWorktrees}
           onRemoveRecentWorkDir={removeRecentWorkDirForDaemon}
           onClose={() => setNewSessionDaemonIds(null)}
-          onCreate={(daemonId, workDir, tool, launch) => {
+          onCreate={(daemonId, workDir, tool, launch, worktree, label) => {
             const daemon = newSessionDaemons.find(daemon => daemon.id === daemonId) || null
             setRecentWorkDirs(current => persistRecentWorkDirs(addRecentWorkDir(current, daemon, workDir)))
-            createPtySession(daemonId, workDir, tool, launch)
+            createPtySession(daemonId, workDir, tool, launch, worktree, label)
             setActiveMobileView('terminal')
           }}
         />
@@ -242,6 +282,22 @@ function App() {
 
     </div>
   )
+}
+
+function duplicateLaunchOptions(session: SessionInfo, preserveYolo: boolean): LaunchOptions {
+  const yoloMode = preserveYolo && supportsYoloMode(session.tool)
+  if (session.launch_mode !== 'custom') {
+    return yoloMode ? { launchMode: 'local', yoloMode: true } : { launchMode: 'local' }
+  }
+  const launch: LaunchOptions = {
+    launchMode: 'custom',
+    launchCommand: session.launch_command || undefined,
+    launchLabel: session.launch_label || undefined,
+  }
+  if (yoloMode) {
+    launch.yoloMode = true
+  }
+  return launch
 }
 
 function AuthScreen({
@@ -352,14 +408,6 @@ function ConnectDaemonPanel({ daemons }: { daemons: Daemon[] }) {
         copied={copied === 'launch'}
         onCopy={() => copyCommand('launch', daemonCommand)}
       />
-      <button
-        type="button"
-        className="update-button"
-        disabled
-        title="Update from the Space UI will be enabled after the GitHub repo is public."
-      >
-        Update unavailable
-      </button>
       {SHOW_CLOUD_HOSTS && <HfCloudHostPanel daemons={daemons} />}
     </div>
   )

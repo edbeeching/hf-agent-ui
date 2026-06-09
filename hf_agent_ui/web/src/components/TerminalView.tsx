@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -41,8 +41,49 @@ export function TerminalView({
   const onInputRef = useRef(onInput)
   const onResizeRef = useRef(onResize)
   const pendingPreviewUrlRef = useRef<string | null>(null)
+  const followOutputRef = useRef(true)
+  const layoutFrameRef = useRef<number | null>(null)
+  const visibleRef = useRef(visible)
   const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const [mobileInput, setMobileInput] = useState('')
+
+  const scheduleTerminalLayout = useCallback((follow: boolean, forceFollow = false): void => {
+    if (!termRef.current || !fitRef.current) return
+    if (!visibleRef.current) {
+      if (layoutFrameRef.current !== null) {
+        window.cancelAnimationFrame(layoutFrameRef.current)
+        layoutFrameRef.current = null
+      }
+      return
+    }
+    if (layoutFrameRef.current !== null) {
+      window.cancelAnimationFrame(layoutFrameRef.current)
+    }
+    layoutFrameRef.current = window.requestAnimationFrame(() => {
+      layoutFrameRef.current = null
+      if (!visibleRef.current) return
+      fitRef.current?.fit()
+      const term = termRef.current
+      if (!term) return
+      if (follow && (forceFollow || followOutputRef.current)) {
+        scrollTerminalToBottom(term)
+        followOutputRef.current = true
+        setShowScrollButton(false)
+      } else {
+        setShowScrollButton(!isTerminalAtBottom(term))
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    visibleRef.current = visible
+    if (!visible && layoutFrameRef.current !== null) {
+      window.cancelAnimationFrame(layoutFrameRef.current)
+      layoutFrameRef.current = null
+    }
+  }, [visible])
 
   useEffect(() => {
     onInputRef.current = onInput
@@ -57,6 +98,10 @@ export function TerminalView({
       if (pendingPreviewUrlRef.current) {
         URL.revokeObjectURL(pendingPreviewUrlRef.current)
         pendingPreviewUrlRef.current = null
+      }
+      if (layoutFrameRef.current !== null) {
+        window.cancelAnimationFrame(layoutFrameRef.current)
+        layoutFrameRef.current = null
       }
     }
   }, [])
@@ -102,10 +147,15 @@ export function TerminalView({
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
     term.open(containerRef.current)
+    configureTerminalTextarea(containerRef.current)
     fitAddon.fit()
+    followOutputRef.current = true
+    setShowScrollButton(false)
 
     // Send keystrokes to the session
     term.onData((data) => {
+      followOutputRef.current = true
+      scheduleTerminalLayout(true, true)
       onInputRef.current(data)
     })
 
@@ -117,11 +167,16 @@ export function TerminalView({
     // Window resize
     const handleResize = () => {
       term.options.fontSize = terminalFontSize()
-      fitAddon.fit()
+      scheduleTerminalLayout(followOutputRef.current)
     }
     window.addEventListener('resize', handleResize)
     const observer = new ResizeObserver(handleResize)
     observer.observe(containerRef.current)
+    const scrollDisposable = term.onScroll(() => {
+      const atBottom = isTerminalAtBottom(term)
+      followOutputRef.current = atBottom
+      setShowScrollButton(!atBottom)
+    })
 
     termRef.current = term
     fitRef.current = fitAddon
@@ -129,28 +184,48 @@ export function TerminalView({
     return () => {
       window.removeEventListener('resize', handleResize)
       observer.disconnect()
+      scrollDisposable.dispose()
+      if (layoutFrameRef.current !== null) {
+        window.cancelAnimationFrame(layoutFrameRef.current)
+        layoutFrameRef.current = null
+      }
       term.dispose()
       termRef.current = null
       fitRef.current = null
       writtenRef.current = 0
+      followOutputRef.current = true
     }
-  }, [sessionId])
+  }, [scheduleTerminalLayout, sessionId])
 
   // Write new output to terminal
   useEffect(() => {
-    if (!termRef.current) return
+    const term = termRef.current
+    if (!term) return
     const start = writtenRef.current
+    if (start >= output.length) return
+    const shouldFollow = followOutputRef.current || isTerminalAtBottom(term)
     for (let i = start; i < output.length; i++) {
-      termRef.current.write(output[i])
+      const chunk = output[i]
+      if (i === output.length - 1 && shouldFollow) {
+        term.write(chunk, () => {
+          scheduleTerminalLayout(true)
+          followOutputRef.current = true
+          setShowScrollButton(false)
+        })
+      } else {
+        term.write(chunk)
+      }
     }
     writtenRef.current = output.length
-  }, [output])
+    if (!shouldFollow) {
+      setShowScrollButton(true)
+    }
+  }, [output, scheduleTerminalLayout])
 
   useEffect(() => {
     if (!visible || !fitRef.current) return
-    const frame = window.requestAnimationFrame(() => fitRef.current?.fit())
-    return () => window.cancelAnimationFrame(frame)
-  }, [visible, sessionId])
+    scheduleTerminalLayout(followOutputRef.current)
+  }, [visible, sessionId, needsInput, scheduleTerminalLayout])
 
   if (!sessionId) {
     return (
@@ -231,6 +306,33 @@ export function TerminalView({
     })
   }
 
+  function handleScrollToBottom(): void {
+    if (!termRef.current) return
+    followOutputRef.current = true
+    scheduleTerminalLayout(true, true)
+    setShowScrollButton(false)
+  }
+
+  function sendTerminalInput(data: string): void {
+    if (!data) return
+    followOutputRef.current = true
+    scheduleTerminalLayout(true, true)
+    onInputRef.current(data)
+  }
+
+  function handleMobileSend(): void {
+    const text = mobileInput
+    if (!text) return
+    sendTerminalInput(`${text}\r`)
+    setMobileInput('')
+  }
+
+  function handleMobileKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    handleMobileSend()
+  }
+
   return (
     <div className={`terminal-shell ${needsInput ? 'needs-input' : ''}`} onPasteCapture={handlePaste}>
       {needsInput && (
@@ -281,6 +383,41 @@ export function TerminalView({
         </form>
       )}
       <div ref={containerRef} className="terminal-container" />
+      <div className="mobile-terminal-input" aria-label="Mobile terminal input">
+        <div className="mobile-terminal-shortcuts">
+          <button type="button" onClick={() => sendTerminalInput('\t')}>Tab</button>
+          <button type="button" onClick={() => sendTerminalInput('\x1b')}>Esc</button>
+          <button type="button" onClick={() => sendTerminalInput('\x03')}>Ctrl+C</button>
+          <button type="button" onClick={() => sendTerminalInput('\r')}>Enter</button>
+        </div>
+        <div className="mobile-terminal-compose">
+          <input
+            type="text"
+            value={mobileInput}
+            onChange={event => setMobileInput(event.target.value)}
+            onKeyDown={handleMobileKeyDown}
+            placeholder="Type command"
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <button type="button" onClick={handleMobileSend} disabled={!mobileInput}>
+            Send
+          </button>
+        </div>
+      </div>
+      {showScrollButton && (
+        <button
+          type="button"
+          className="terminal-scroll-bottom"
+          onClick={handleScrollToBottom}
+          aria-label="Scroll to latest terminal output"
+          title="Scroll to bottom"
+        >
+          ↓
+        </button>
+      )}
     </div>
   )
 }
@@ -295,6 +432,33 @@ interface PendingScreenshot {
 
 function terminalFontSize(): number {
   return window.matchMedia('(max-width: 760px)').matches ? 12 : 13
+}
+
+function configureTerminalTextarea(container: HTMLElement): void {
+  const textarea = container.querySelector('textarea')
+  if (!textarea) return
+  textarea.setAttribute('autocorrect', 'off')
+  textarea.setAttribute('autocapitalize', 'none')
+  textarea.setAttribute('autocomplete', 'off')
+  textarea.spellcheck = false
+}
+
+function isTerminalAtBottom(term: Terminal): boolean {
+  const buffer = term.buffer.active
+  return buffer.baseY - buffer.viewportY <= 1
+}
+
+function scrollTerminalToBottom(term: Terminal): void {
+  term.scrollToBottom()
+  followTerminalOutput(term)
+}
+
+function followTerminalOutput(term: Terminal): void {
+  const buffer = term.buffer.active
+  if (buffer.baseY - buffer.viewportY <= 1) {
+    return
+  }
+  term.scrollToLine(buffer.baseY)
 }
 
 function openTerminalLink(uri: string): void {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { supportsYoloMode } from '../hooks/useAgentUi'
 import type { Daemon, SessionInfo } from '../hooks/useAgentUi'
 
 interface Props {
@@ -10,6 +11,8 @@ interface Props {
   onCloseSession: (daemonId: string, sessionId: string) => void
   onPauseSession: (daemonId: string, sessionId: string) => void
   onResumeSession: (daemonId: string, sessionId: string) => void
+  onRenameSession: (daemonId: string, sessionId: string, label: string | null) => void
+  onDuplicateSession: (daemonId: string, session: SessionInfo) => void
 }
 
 interface ContextMenuState {
@@ -35,6 +38,7 @@ interface ProjectGroup {
 interface EnvironmentGroup {
   key: EnvironmentKey
   label: string
+  daemons: Map<string, Daemon>
   projects: Map<string, ProjectGroup>
 }
 
@@ -55,9 +59,13 @@ export function DaemonList({
   onCloseSession,
   onPauseSession,
   onResumeSession,
+  onRenameSession,
+  onDuplicateSession,
 }: Props) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [copiedPathSessionId, setCopiedPathSessionId] = useState<string | null>(null)
   const groupedDaemons = groupDaemons(daemons, sessions)
+  const contextSession = contextMenu ? findSession(sessions, contextMenu.daemonId, contextMenu.sessionId) : null
 
   useEffect(() => {
     if (!contextMenu) return
@@ -82,9 +90,9 @@ export function DaemonList({
         <div key={environment.key} className="environment-group">
           <div className="environment-header">
             <span>{environment.label}</span>
-            {countEnvironmentInputRequired(environment) > 0 && (
-              <span className="group-input-count" title="Sessions needing input">
-                {countEnvironmentInputRequired(environment)}
+            {countEnvironmentAttention(environment) > 0 && (
+              <span className="group-input-count" title="Sessions needing attention">
+                {countEnvironmentAttention(environment)}
               </span>
             )}
             <EnvironmentNewSessionButton environment={environment} onNewSession={onNewSession} />
@@ -93,9 +101,9 @@ export function DaemonList({
             <div key={`${environment.key}-${project.name}`} className="project-group">
               <div className="project-header">
                 <span className="project-name">{project.name}</span>
-                {countProjectInputRequired(project) > 0 && (
-                  <span className="group-input-count" title="Sessions needing input">
-                    {countProjectInputRequired(project)}
+                {countProjectAttention(project) > 0 && (
+                  <span className="group-input-count" title="Sessions needing attention">
+                    {countProjectAttention(project)}
                   </span>
                 )}
                 <span className="project-count">{countProjectSessions(project)}</span>
@@ -106,7 +114,10 @@ export function DaemonList({
                 onSelectSession={onSelectSession}
                 onPauseSession={onPauseSession}
                 onResumeSession={onResumeSession}
-                onOpenContextMenu={setContextMenu}
+                onOpenContextMenu={state => {
+                  setCopiedPathSessionId(null)
+                  setContextMenu(state)
+                }}
               />
             </div>
           ))}
@@ -118,9 +129,41 @@ export function DaemonList({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={event => event.stopPropagation()}
         >
-          <button type="button" disabled>Rename</button>
-          <button type="button" disabled>Duplicate</button>
-          <button type="button" disabled>Copy path</button>
+          <button
+            type="button"
+            disabled={!contextSession}
+            onClick={() => {
+              if (!contextSession) return
+              const nextLabel = window.prompt('Session label', contextSession.label || '')
+              if (nextLabel === null) return
+              onRenameSession(contextMenu.daemonId, contextMenu.sessionId, nextLabel.trim() || null)
+              setContextMenu(null)
+            }}
+          >
+            Label
+          </button>
+          <button
+            type="button"
+            disabled={!contextSession}
+            onClick={() => {
+              if (!contextSession) return
+              onDuplicateSession(contextMenu.daemonId, contextSession)
+              setContextMenu(null)
+            }}
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            disabled={!contextSession}
+            onClick={() => {
+              if (!contextSession) return
+              void copyText(contextSession.work_dir)
+              setCopiedPathSessionId(contextSession.id)
+            }}
+          >
+            {copiedPathSessionId === contextSession?.id ? 'Copied path' : 'Copy path'}
+          </button>
           <button
             type="button"
             className="danger"
@@ -176,15 +219,10 @@ function ProjectSection({
 }) {
   return (
     <div className="project-sessions">
-      {project.sessions.length === 0 && (
-        <div className="session-item empty-session">
-          <span>No active sessions</span>
-        </div>
-      )}
       {project.sessions.map(({ daemon, session }) => (
         <div
           key={`${daemon.id}-${session.id}`}
-          className={`session-item ${selectedSession?.daemonId === daemon.id && selectedSession?.sessionId === session.id ? 'selected' : ''} ${session.needs_input ? 'needs-input' : ''}`}
+          className={`session-item ${selectedSession?.daemonId === daemon.id && selectedSession?.sessionId === session.id ? 'selected' : ''} ${session.needs_input ? 'needs-input' : ''} ${session.agent_state === 'done' ? 'needs-review' : ''}`}
           onClick={() => onSelectSession(daemon.id, session.id)}
           onContextMenu={event => {
             event.preventDefault()
@@ -199,7 +237,7 @@ function ProjectSection({
           title={session.needs_input ? session.needs_input_reason || 'Human input required' : daemon.name}
           aria-label={session.needs_input ? `${session.tool} session needs input` : `${session.tool} session`}
         >
-          <span className={`status-dot ${session.needs_input ? 'input-required' : session.status}`} />
+          <span className={`status-dot ${statusClass(session)}`} />
           {session.needs_input && (
             <span className={`input-required-badge ${session.needs_input_kind || 'prompt'}`}>
               {inputBadgeLabel(session.needs_input_kind)}
@@ -211,7 +249,22 @@ function ProjectSection({
               {session.launch_label || 'custom'}
             </span>
           )}
-          <span className="session-dir">{session.work_dir}</span>
+          {supportsYoloMode(session.tool) && session.yolo_mode && (
+            <span
+              className="yolo-badge"
+              title="YOLO mode enabled: skips approval and sandbox prompts"
+              aria-label="YOLO mode enabled: skips approval and sandbox prompts"
+            >
+              yolo
+            </span>
+          )}
+          <GitBadges session={session} />
+          <span
+            className={`session-name ${session.label ? 'labeled' : ''}`}
+            title={session.work_dir}
+          >
+            {sessionDisplayName(session)}
+          </span>
           {project.daemons.size > 1 && (
             <span className="session-daemon" title={daemon.hostname || daemon.host}>{daemon.name}</span>
           )}
@@ -251,27 +304,29 @@ function groupDaemons(daemons: Daemon[], sessions: Map<string, SessionInfo[]>): 
     groups.set(key, {
       key,
       label: ENVIRONMENT_LABELS[key],
+      daemons: new Map(),
       projects: new Map(),
     })
   }
 
   for (const daemon of daemons) {
     const environment = deriveEnvironment(daemon)
+    const environmentGroup = groups.get(environment)!
     const daemonSessions = sessions.get(daemon.id) || []
+    environmentGroup.daemons.set(daemon.id, daemon)
 
     if (daemonSessions.length === 0) {
-      addDaemonToProject(groups.get(environment)!, 'No project', daemon)
       continue
     }
 
     for (const session of daemonSessions) {
-      addSessionToProject(groups.get(environment)!, projectNameFromPath(session.work_dir), daemon, session)
+      addSessionToProject(environmentGroup, projectNameForSession(session), daemon, session)
     }
   }
 
   return ENVIRONMENT_ORDER
     .map(key => groups.get(key)!)
-    .filter(group => group.projects.size > 0)
+    .filter(group => group.daemons.size > 0)
 }
 
 function addDaemonToProject(
@@ -328,17 +383,35 @@ function projectNameFromPath(path: string): string {
   return parts[parts.length - 1] || trimmed
 }
 
+function projectNameForSession(session: SessionInfo): string {
+  return projectNameFromPath(session.worktree?.source_dir || session.work_dir)
+}
+
+function sessionDisplayName(session: SessionInfo): string {
+  if (session.label) return session.label
+  if (session.worktree?.branch) return session.worktree.branch
+  return compactPath(session.work_dir)
+}
+
+function compactPath(path: string): string {
+  const trimmed = path.trim().replace(/[\\/]+$/, '')
+  if (!trimmed || trimmed === '~') return 'Home'
+  const parts = trimmed.split(/[\\/]+/).filter(Boolean)
+  if (parts.length <= 2) return trimmed
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+}
+
 function countProjectSessions(project: ProjectGroup): number {
   return project.sessions.length
 }
 
-function countProjectInputRequired(project: ProjectGroup): number {
-  return project.sessions.filter(({ session }) => session.needs_input).length
+function countProjectAttention(project: ProjectGroup): number {
+  return project.sessions.filter(({ session }) => session.needs_input || session.agent_state === 'done').length
 }
 
-function countEnvironmentInputRequired(environment: EnvironmentGroup): number {
+function countEnvironmentAttention(environment: EnvironmentGroup): number {
   return [...environment.projects.values()]
-    .reduce((total, project) => total + countProjectInputRequired(project), 0)
+    .reduce((total, project) => total + countProjectAttention(project), 0)
 }
 
 function inputBadgeLabel(kind: SessionInfo['needs_input_kind']): string {
@@ -349,11 +422,70 @@ function inputBadgeLabel(kind: SessionInfo['needs_input_kind']): string {
 }
 
 function environmentDaemons(environment: EnvironmentGroup): Daemon[] {
-  const daemons = new Map<string, Daemon>()
-  for (const project of environment.projects.values()) {
-    for (const daemon of project.daemons.values()) {
-      daemons.set(daemon.id, daemon)
-    }
+  return [...environment.daemons.values()]
+}
+
+function statusClass(session: SessionInfo): string {
+  if (session.needs_input || session.agent_state === 'blocked') return 'blocked'
+  if (session.agent_state === 'working') return 'working'
+  if (session.agent_state === 'done') return 'done'
+  if (session.agent_state === 'idle') return 'idle'
+  return session.status || 'unknown'
+}
+
+function GitBadges({ session }: { session: SessionInfo }) {
+  const git = session.git
+  if (!git?.branch && !session.worktree) return null
+  return (
+    <span className="session-git-badges" aria-label="Git status">
+      {session.worktree && (
+        <span className="git-badge worktree" title={`Worktree branch ${session.worktree.branch}`}>
+          wt
+        </span>
+      )}
+      {git?.branch && (
+        <span className="git-badge branch" title={`Git branch ${git.branch}`}>
+          {git.branch}
+        </span>
+      )}
+      {git?.dirty && (
+        <span className="git-badge dirty" title="Uncommitted changes">
+          *
+        </span>
+      )}
+      {typeof git?.ahead === 'number' && git.ahead > 0 && (
+        <span className="git-badge" title={`${git.ahead} commits ahead`}>
+          +{git.ahead}
+        </span>
+      )}
+      {typeof git?.behind === 'number' && git.behind > 0 && (
+        <span className="git-badge" title={`${git.behind} commits behind`}>
+          -{git.behind}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function findSession(
+  sessions: Map<string, SessionInfo[]>,
+  daemonId: string,
+  sessionId: string,
+): SessionInfo | null {
+  return (sessions.get(daemonId) || []).find(session => session.id === sessionId) || null
+}
+
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.append(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
   }
-  return [...daemons.values()]
 }

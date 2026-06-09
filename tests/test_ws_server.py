@@ -4,8 +4,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import shutil
 import stat
+import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -90,11 +93,55 @@ async def test_create_pty_session_via_ws(tmp_path: Path) -> None:
             assert created["session"]["tool"] == "mock"
             assert created["session"]["mode"] == "pty"
             assert created["session"]["status"] == "running"
+            assert created["session"]["label"] is None
+            assert created["session"]["agent_state"] in {"idle", "working"}
+            assert "git" in created["session"]
             assert created["session"]["needs_input"] is False
             assert created["session"]["needs_input_reason"] is None
 
             session_id = created["session"]["id"]
             assert manager.get(session_id) is not None
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_rename_and_mark_seen_session_via_ws(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "mock"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            msgs = await _send_recv(ws, {
+                "type": "session.rename",
+                "sessionId": session_id,
+                "label": "Backend cleanup",
+            })
+            renamed = next(m for m in msgs if m["type"] == "session.renamed")
+            assert renamed["sessionId"] == session_id
+            assert renamed["session"]["label"] == "Backend cleanup"
+
+            session = manager.get(session_id)
+            assert session is not None
+            activity_at = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+            session.last_activity_at = activity_at
+            session.done_since = activity_at
+
+            msgs = await _send_recv(ws, {
+                "type": "session.mark_seen",
+                "sessionId": session_id,
+            })
+            updated = next(m for m in msgs if m["type"] == "session.updated")
+            assert updated["session"]["done_since"] is None
+            assert updated["session"]["last_seen_at"] is not None
+            assert updated["session"]["agent_state"] != "done"
     finally:
         manager.stop_all()
         await server.stop()
@@ -118,6 +165,55 @@ async def test_create_pty_session_defaults_to_codex_via_ws(tmp_path: Path) -> No
 
             created = next(m for m in msgs if m["type"] == "pty.created")
             assert created["session"]["tool"] == "codex"
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_create_codex_yolo_session_via_ws(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+                "tool": "codex",
+                "yoloMode": True,
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["tool"] == "codex"
+            assert created["session"]["yolo_mode"] is True
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_create_pty_session_ignores_non_boolean_yolo_mode(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+                "tool": "codex",
+                "yoloMode": "true",
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["yolo_mode"] is False
     finally:
         manager.stop_all()
         await server.stop()
@@ -175,6 +271,118 @@ async def test_create_custom_launch_requires_command_placeholder(tmp_path: Path)
             assert error["requestType"] == "pty.create"
             assert "{command}" in error["message"]
             assert manager.list() == []
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_create_worktree_session_cleans_up_if_start_fails(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "scratch"
+    source_dir.mkdir()
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(source_dir),
+                "tool": "mock",
+                "worktree": {
+                    "enabled": True,
+                    "sourceDir": str(source_dir),
+                    "branch": "agent/missing-source",
+                    "startPoint": "HEAD",
+                },
+            })
+
+            error = next(m for m in msgs if m["type"] == "error")
+            assert error["requestType"] == "pty.create"
+            assert manager.list() == []
+            assert not (repo / ".worktrees" / "agent-missing-source").exists()
+            assert _git(repo, "show-ref", "--verify", "--quiet", "refs/heads/agent/missing-source").returncode == 1
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_list_existing_worktrees_via_ws(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "scratch"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("scratch\n", encoding="utf-8")
+    _git(repo, "add", ".", check=True)
+    _git(repo, "commit", "-m", "add scratch", check=True)
+    existing_root = repo / ".worktrees" / "feature-ws-list"
+    _git(repo, "worktree", "add", "-b", "feature/ws-list", str(existing_root), "HEAD", check=True)
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "worktrees.list",
+                "sourceDir": str(source_dir),
+                "requestId": "req-list",
+            })
+
+            list_msg = next(m for m in msgs if m["type"] == "worktrees.list")
+            assert list_msg["sourceDir"] == str(source_dir)
+            assert list_msg["requestId"] == "req-list"
+            assert len(list_msg["worktrees"]) == 1
+            item = list_msg["worktrees"][0]
+            assert item["branch"] == "feature/ws-list"
+            assert item["worktree_root"] == str(existing_root.resolve())
+            assert item["work_dir"] == str((existing_root / "scratch").resolve())
+            assert item["available"] is True
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_create_existing_worktree_session_via_ws(tmp_path: Path) -> None:
+    repo = _init_git_repo(tmp_path / "repo")
+    source_dir = repo / "scratch"
+    source_dir.mkdir()
+    (source_dir / "README.md").write_text("scratch\n", encoding="utf-8")
+    _git(repo, "add", ".", check=True)
+    _git(repo, "commit", "-m", "add scratch", check=True)
+    existing_root = repo / ".worktrees" / "feature-ws-attach"
+    _git(repo, "worktree", "add", "-b", "feature/ws-attach", str(existing_root), "HEAD", check=True)
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(source_dir),
+                "tool": "mock",
+                "worktree": {
+                    "enabled": True,
+                    "mode": "existing",
+                    "sourceDir": str(source_dir),
+                    "worktreeRoot": str(existing_root),
+                },
+            })
+
+            created = next(m for m in msgs if m["type"] == "pty.created")
+            assert created["session"]["work_dir"] == str((existing_root / "scratch").resolve())
+            assert created["session"]["worktree"]["branch"] == "feature/ws-attach"
+            assert created["session"]["worktree"]["managed"] is False
+            assert existing_root.is_dir()
     finally:
         manager.stop_all()
         await server.stop()
@@ -409,6 +617,36 @@ async def test_pause_and_resume_session_via_ws(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_resume_missing_work_dir_returns_error_and_keeps_ws_alive(tmp_path: Path) -> None:
+    work_dir = tmp_path / "gone"
+    work_dir.mkdir()
+    manager = SessionManager(tmp_path / "state.json")
+    session = manager.create_pty(str(work_dir), tool="mock")
+    shutil.rmtree(work_dir)
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "session.resume",
+                "sessionId": session.id,
+            })
+            error = next(m for m in msgs if m["type"] == "error")
+            assert error["requestType"] == "session.resume"
+            assert error["sessionId"] == session.id
+
+            msgs = await _send_recv(ws, {"type": "session.list"})
+            list_msg = next(m for m in msgs if m["type"] == "session.list")
+            assert [item["id"] for item in list_msg["sessions"]] == [session.id]
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.usefixtures("_mock_codex_tool")
 async def test_send_session_image_to_codex_via_ws(monkeypatch, tmp_path: Path) -> None:
     """Pasted screenshots should be saved privately and used to relaunch Codex with an image."""
@@ -529,3 +767,24 @@ async def test_error_on_unknown_pty_session(tmp_path: Path) -> None:
     finally:
         manager.stop_all()
         await server.stop()
+
+
+def _init_git_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    (path / "README.md").write_text("hello\n", encoding="utf-8")
+    _git(path, "init", check=True)
+    _git(path, "config", "user.email", "test@example.com", check=True)
+    _git(path, "config", "user.name", "Test User", check=True)
+    _git(path, "add", ".", check=True)
+    _git(path, "commit", "-m", "initial", check=True)
+    return path
+
+
+def _git(repo: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=check,
+        capture_output=True,
+        text=True,
+    )
