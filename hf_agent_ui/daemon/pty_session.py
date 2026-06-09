@@ -189,7 +189,7 @@ class PtySession:
         env["TERM"] = "xterm-256color"
         hook_file: Path | None = None
         if self.tool == "claude":
-            hook_file = self._prepare_claude_notification_hook(env)
+            hook_file = self._prepare_claude_input_hooks(env)
         elif self.tool == "codex":
             hook_file = self._prepare_codex_permission_hook(env)
         args = self._build_args(cmd, resume=resume, prompt=prompt, image_paths=image_paths)
@@ -224,7 +224,7 @@ class PtySession:
         await self._emit({"type": "pty.started", "sessionId": self.id})
 
         if hook_file and self.tool == "claude":
-            self._hook_task = asyncio.create_task(self._watch_claude_notifications(hook_file))
+            self._hook_task = asyncio.create_task(self._watch_claude_input_hooks(hook_file))
         elif hook_file and self.tool == "codex":
             self._hook_task = asyncio.create_task(self._watch_codex_permission_requests(hook_file))
         self._read_task = asyncio.create_task(self._read_loop())
@@ -373,14 +373,16 @@ class PtySession:
             return os.read(master_fd, 16384)
         return b""
 
-    def write(self, data: str) -> None:
+    def write(self, data: str) -> bool:
         """Write input (keystrokes) to the PTY."""
-        if self._master_fd is not None and self.status == "running":
-            os.write(self._master_fd, data.encode("utf-8"))
-            if data:
-                self.mark_seen()
-                if self.needs_input:
-                    self._schedule_input_resolved()
+        if self._master_fd is None or self.status != "running":
+            return False
+        os.write(self._master_fd, data.encode("utf-8"))
+        if data:
+            self.mark_seen()
+            if self.needs_input:
+                self._schedule_input_resolved()
+        return True
 
     async def send_image_to_codex(self, *, image_path: str | Path, prompt: str) -> None:
         if self.tool != "codex":
@@ -705,6 +707,8 @@ class PtySession:
         loop.create_task(self._mark_input_resolved())
 
     async def _detect_input_required_from_output(self, text: str) -> None:
+        if self.tool in {"claude", "codex"}:
+            return
         clean = _strip_ansi(text)
         if not clean.strip():
             return
@@ -713,7 +717,7 @@ class PtySession:
         if signal:
             await self._mark_input_required(signal, "pty")
 
-    def _prepare_claude_notification_hook(self, env: dict[str, str]) -> Path | None:
+    def _prepare_claude_input_hooks(self, env: dict[str, str]) -> Path | None:
         hook_dir = Path(tempfile.gettempdir()) / "hf-agent-ui-claude-hooks"
         hook_dir.mkdir(parents=True, exist_ok=True)
         hook_file = hook_dir / f"{self.id}.jsonl"
@@ -724,9 +728,9 @@ class PtySession:
         env["HF_AGENT_UI_PYTHON"] = sys.executable
 
         try:
-            self._install_claude_notification_hook()
+            self._install_claude_input_hooks()
         except Exception:
-            logger.exception("Failed to install Claude notification hook for session %s", self.id)
+            logger.exception("Failed to install Claude input hook for session %s", self.id)
         return hook_file
 
     def _prepare_codex_permission_hook(self, env: dict[str, str]) -> Path | None:
@@ -741,7 +745,7 @@ class PtySession:
         self._codex_hook_enabled = True
         return hook_file
 
-    def _install_claude_notification_hook(self) -> None:
+    def _install_claude_input_hooks(self) -> None:
         work_dir = Path(self.work_dir)
         if not work_dir.is_dir():
             logger.warning("Skipping Claude hook install because work directory does not exist: %s", work_dir)
@@ -766,30 +770,19 @@ class PtySession:
         if not isinstance(hooks, dict):
             logger.warning("Skipping Claude hook install because hooks in %s is not an object", settings_file)
             return
-        notifications = hooks.setdefault("Notification", [])
-        if not isinstance(notifications, list):
-            logger.warning("Skipping Claude hook install because Notification hooks in %s is not a list", settings_file)
+
+        _remove_claude_hook_command(hooks, "Notification", command)
+        if not _ensure_claude_hook_command(hooks, "PermissionRequest", command):
+            logger.warning("Skipping Claude hook install because PermissionRequest hooks in %s is not a list", settings_file)
+            return
+        if not _ensure_claude_hook_command(hooks, "Elicitation", command):
+            logger.warning("Skipping Claude hook install because Elicitation hooks in %s is not a list", settings_file)
             return
 
-        for group in notifications:
-            if not isinstance(group, dict):
-                continue
-            for hook in group.get("hooks", []):
-                if isinstance(hook, dict) and hook.get("type") == "command" and hook.get("command") == command:
-                    return
-
-        notifications.append({
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": command,
-                },
-            ],
-        })
         settings_dir.mkdir(parents=True, exist_ok=True)
         settings_file.write_text(json.dumps(settings, indent=2) + "\n")
 
-    async def _watch_claude_notifications(self, hook_file: Path) -> None:
+    async def _watch_claude_input_hooks(self, hook_file: Path) -> None:
         offset = 0
         while self._proc and self._proc.poll() is None:
             try:
@@ -802,16 +795,16 @@ class PtySession:
                                 event = json.loads(line)
                             except json.JSONDecodeError:
                                 continue
-                            if event.get("hook_event_name") != "Notification":
+                            if event.get("hook_event_name") not in {"PermissionRequest", "Elicitation"}:
                                 continue
-                            signal = _detect_claude_notification(event)
+                            signal = _detect_claude_input_hook(event)
                             if signal:
                                 await self._mark_input_required(signal, "claude-hook")
                 await asyncio.sleep(0.5)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("Failed to read Claude notification hook output")
+                logger.exception("Failed to read Claude input hook output")
                 await asyncio.sleep(1.0)
 
     async def _watch_codex_permission_requests(self, hook_file: Path) -> None:
@@ -851,53 +844,148 @@ def _strip_ansi(text: str) -> str:
     return ANSI_RE.sub("", text).replace("\r", "\n")
 
 
+def _remove_claude_hook_command(hooks: dict[str, Any], event_name: str, command: str) -> None:
+    groups = hooks.get(event_name)
+    if not isinstance(groups, list):
+        return
+
+    next_groups: list[Any] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            next_groups.append(group)
+            continue
+        hook_list = group.get("hooks")
+        if not isinstance(hook_list, list):
+            next_groups.append(group)
+            continue
+        filtered_hooks = [
+            hook
+            for hook in hook_list
+            if not (
+                isinstance(hook, dict)
+                and hook.get("type") == "command"
+                and hook.get("command") == command
+            )
+        ]
+        if filtered_hooks:
+            next_group = dict(group)
+            next_group["hooks"] = filtered_hooks
+            next_groups.append(next_group)
+
+    if next_groups:
+        hooks[event_name] = next_groups
+    else:
+        hooks.pop(event_name, None)
+
+
+def _ensure_claude_hook_command(hooks: dict[str, Any], event_name: str, command: str) -> bool:
+    groups = hooks.setdefault(event_name, [])
+    if not isinstance(groups, list):
+        return False
+
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        hook_list = group.get("hooks")
+        if not isinstance(hook_list, list):
+            continue
+        for hook in hook_list:
+            if isinstance(hook, dict) and hook.get("type") == "command" and hook.get("command") == command:
+                return True
+
+    groups.append({
+        "hooks": [
+            {
+                "type": "command",
+                "command": command,
+            },
+        ],
+    })
+    return True
+
+
+def _clean_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _string_from_mapping(mapping: object, *keys: str) -> str | None:
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        value = _clean_string(mapping.get(key))
+        if value:
+            return value
+    return None
+
+
+def _detect_claude_input_hook(event: dict[str, Any]) -> InputRequiredSignal | None:
+    hook_event_name = str(event.get("hook_event_name", "")).strip()
+    if hook_event_name == "PermissionRequest":
+        return _detect_claude_permission_request(event)
+    if hook_event_name == "Elicitation":
+        return _detect_claude_elicitation(event)
+    return None
+
+
+def _detect_claude_permission_request(event: dict[str, Any]) -> InputRequiredSignal:
+    tool_name = _clean_string(event.get("tool_name")) or "tool"
+    tool_input = event.get("tool_input")
+    description = _string_from_mapping(tool_input, "description")
+    command = _string_from_mapping(tool_input, "command")
+
+    if description:
+        reason = description
+        message = description
+    elif command:
+        reason = "Claude command approval required"
+        message = f"Claude wants to run: {command}"
+    else:
+        reason = f"Claude needs approval for {tool_name}"
+        message = reason
+
+    return InputRequiredSignal(
+        reason=reason,
+        kind="permission",
+        title="Claude approval required",
+        message=message,
+        tool_name=tool_name,
+    )
+
+
+def _detect_claude_elicitation(event: dict[str, Any]) -> InputRequiredSignal:
+    payload = event.get("elicitation") or event.get("request") or event.get("tool_input")
+    title = (
+        _clean_string(event.get("title"))
+        or _string_from_mapping(payload, "title")
+        or "Claude input requested"
+    )
+    message = (
+        _clean_string(event.get("message"))
+        or _clean_string(event.get("prompt"))
+        or _string_from_mapping(payload, "message", "prompt", "question")
+    )
+    server_name = (
+        _clean_string(event.get("server_name"))
+        or _clean_string(event.get("mcp_server_name"))
+        or _clean_string(event.get("tool_name"))
+        or "MCP"
+    )
+    reason = message or f"Claude needs input from {server_name}"
+
+    return InputRequiredSignal(
+        reason=reason,
+        kind="prompt",
+        title=title,
+        message=message or reason,
+        tool_name=server_name,
+    )
+
+
 def _detect_claude_notification(event: dict[str, Any]) -> InputRequiredSignal | None:
-    message = str(event.get("message", "")).strip()
-    notification_type = str(event.get("notification_type", "")).strip()
-    title = str(event.get("title", "")).strip()
-
-    if notification_type == "permission_prompt":
-        return InputRequiredSignal(
-            reason=message or "Claude permission required",
-            kind="permission",
-            title=title or "Claude permission required",
-            message=message or None,
-            tool_name="claude",
-        )
-    if notification_type == "idle_prompt":
-        return InputRequiredSignal(
-            reason=message or "Claude is waiting for input",
-            kind="prompt",
-            title=title or "Claude waiting",
-            message=message or None,
-            tool_name="claude",
-        )
-    if notification_type == "elicitation_dialog":
-        return InputRequiredSignal(
-            reason=message or "Claude needs input from an MCP dialog",
-            kind="prompt",
-            title=title or "Claude input requested",
-            message=message or None,
-            tool_name="claude",
-        )
-
-    lower = message.lower()
-    if "permission" in lower or "needs your" in lower:
-        return InputRequiredSignal(
-            reason=message or "Claude permission required",
-            kind="permission",
-            title=title or "Claude permission required",
-            message=message or None,
-            tool_name="claude",
-        )
-    if "waiting for your input" in lower:
-        return InputRequiredSignal(
-            reason=message or "Claude is waiting for input",
-            kind="prompt",
-            title=title or "Claude waiting",
-            message=message or None,
-            tool_name="claude",
-        )
+    del event
     return None
 
 
@@ -934,36 +1022,21 @@ def _detect_codex_permission_request(event: dict[str, Any]) -> InputRequiredSign
 
 
 def _detect_action_required(output: str, tool: str) -> InputRequiredSignal | None:
-    text = " ".join(output.lower().split())
+    if tool in {"codex", "claude"}:
+        return None
 
-    common_patterns = [
+    lines = [line.strip() for line in output.lower().splitlines() if line.strip()]
+    if not lines:
+        return None
+    text = lines[-1][-500:]
+    patterns = [
         (r"\bneeds your permission\b", InputRequiredSignal("Permission required", "permission", "Permission required")),
-        (r"\bwaiting for your input\b", InputRequiredSignal("Waiting for input", "prompt", "Input needed")),
-        (r"\bdo you want to\b", InputRequiredSignal("Confirmation required", "confirmation", "Confirmation required")),
-        (r"\bpress enter to continue\b", InputRequiredSignal("Waiting for Enter", "prompt", "Input needed")),
-        (r"\b(sign in|log in|login|authenticate)\b", InputRequiredSignal("Authentication required", "auth", "Authentication required")),
-        (r"\b(approve|approval required)\b", InputRequiredSignal("Approval required", "permission", "Approval required")),
-        (r"\b(allow|deny)\b.*\?", InputRequiredSignal("Permission required", "permission", "Permission required")),
-        (r"\b(y/n|yes/no)\b", InputRequiredSignal("Confirmation required", "confirmation", "Confirmation required")),
+        (r"\bapproval required[.:]?$", InputRequiredSignal("Approval required", "permission", "Approval required")),
+        (r"\bwaiting for your input[.:]?$", InputRequiredSignal("Waiting for input", "prompt", "Input needed")),
+        (r"\bpress enter to continue[.:]?$", InputRequiredSignal("Waiting for Enter", "prompt", "Input needed")),
+        (r"\bdo you want to\b.*\?\s*$", InputRequiredSignal("Confirmation required", "confirmation", "Confirmation required")),
+        (r"\b(?:y/n|yes/no)\??\s*$", InputRequiredSignal("Confirmation required", "confirmation", "Confirmation required")),
     ]
-
-    codex_patterns = [
-        (r"\bapprove\b.*\b(command|edit|patch|change)\b", InputRequiredSignal("Codex approval required", "permission", "Codex approval required")),
-        (r"\brun command\b.*\?", InputRequiredSignal("Codex command approval required", "permission", "Codex approval required")),
-        (r"\bapply\b.*\bpatch\b.*\?", InputRequiredSignal("Codex edit approval required", "permission", "Codex approval required")),
-    ]
-
-    claude_patterns = [
-        (r"\bclaude needs your permission\b", InputRequiredSignal("Claude permission required", "permission", "Claude permission required")),
-        (r"\bpermission to use\b", InputRequiredSignal("Claude permission required", "permission", "Claude permission required")),
-    ]
-
-    patterns = common_patterns
-    if tool == "codex":
-        patterns = codex_patterns + patterns
-    elif tool == "claude":
-        patterns = claude_patterns + patterns
-
     for pattern, reason in patterns:
         if re.search(pattern, text):
             return reason
@@ -1000,7 +1073,7 @@ def _codex_hook_config_args() -> list[str]:
     )
     return [
         "-c",
-        "features.codex_hooks=true",
+        "features.hooks=true",
         "-c",
         hook_config,
     ]

@@ -22,7 +22,7 @@ class WsRelay:
 
     Browser protocol:
       -> { type: "pty.create", daemonId, workDir, tool?, cols?, rows?, yoloMode? }
-      -> { type: "pty.input", daemonId, sessionId, data }
+      -> { type: "pty.input", daemonId, sessionId, data, requestId? }
       -> { type: "pty.resize", daemonId, sessionId, cols, rows }
       -> { type: "session.image.send", daemonId, sessionId, filename, mimeType, dataBase64, prompt }
       -> { type: "session.stop", daemonId, sessionId }
@@ -33,6 +33,7 @@ class WsRelay:
       -> { type: "worktrees.list", daemonId, sourceDir, requestId? }
 
       <- { type: "pty.created", daemonId, session }
+      <- { type: "pty.input_ack", daemonId, sessionId, requestId? }
       <- { type: "pty.output", daemonId, sessionId, data }
       <- { type: "pty.exit", daemonId, sessionId, code }
       <- { type: "session.image.sent", daemonId, sessionId, path, mimeType, size, session }
@@ -53,6 +54,7 @@ class WsRelay:
         self._session_subscribers: dict[tuple[str, str], set[WebSocket]] = defaultdict(set)
         self._pending_requests: dict[tuple[str, str], Deque[WebSocket]] = defaultdict(deque)
         self._pending_worktree_requests: dict[tuple[str, str], WebSocket] = {}
+        self._pending_input_requests: dict[tuple[str, str], WebSocket] = {}
 
     async def handle_browser(self, ws: WebSocket, user: UserIdentity) -> None:
         await ws.accept()
@@ -155,6 +157,14 @@ class WsRelay:
                 self._session_subscribers[(daemon_id, session_id)].add(ws)
             return
 
+        if msg_type == "pty.input":
+            request_id = _request_id(req)
+            if request_id:
+                self._pending_input_requests[(daemon_id, request_id)] = ws
+            if isinstance(session_id, str) and session_id:
+                self._session_subscribers[(daemon_id, session_id)].add(ws)
+            return
+
         if msg_type in {"session.rename", "session.mark_seen"}:
             self._pending_requests[(daemon_id, msg_type)].append(ws)
             if isinstance(session_id, str) and session_id:
@@ -188,6 +198,10 @@ class WsRelay:
 
         if msg_type == "worktrees.list":
             target = self._pop_pending_worktree_request(daemon_id, msg)
+            return {target} if target else set()
+
+        if msg_type == "pty.input_ack":
+            target = self._pop_pending_input_request(daemon_id, msg)
             return {target} if target else set()
 
         if msg_type == "session.subscribed":
@@ -224,6 +238,12 @@ class WsRelay:
                     if target:
                         return {target}
                     return set()
+                if request_type == "pty.input":
+                    target = self._pop_pending_input_request(daemon_id, msg)
+                    if target:
+                        return {target}
+                    if _request_id(msg):
+                        return set()
                 target = self._pop_pending(daemon_id, request_type)
                 if target:
                     return {target}
@@ -258,7 +278,22 @@ class WsRelay:
             return None
         return self._pop_pending(daemon_id, "worktrees.list")
 
+    def _pop_pending_input_request(self, daemon_id: str, msg: dict[str, Any]) -> WebSocket | None:
+        request_id = _request_id(msg)
+        if not request_id:
+            return None
+        target = self._pending_input_requests.pop((daemon_id, request_id), None)
+        if target in self._clients:
+            return target
+        return None
+
     def _untrack_browser_request(self, ws: WebSocket, daemon_id: str, req: dict[str, Any]) -> None:
+        if req.get("type") == "pty.input":
+            request_id = _request_id(req)
+            if request_id and self._pending_input_requests.get((daemon_id, request_id)) is ws:
+                self._pending_input_requests.pop((daemon_id, request_id), None)
+            return
+
         if req.get("type") != "worktrees.list":
             return
         request_id = _request_id(req)
@@ -280,6 +315,9 @@ class WsRelay:
         for key, target in list(self._pending_worktree_requests.items()):
             if target is ws:
                 self._pending_worktree_requests.pop(key, None)
+        for key, target in list(self._pending_input_requests.items()):
+            if target is ws:
+                self._pending_input_requests.pop(key, None)
         for pending in self._pending_requests.values():
             try:
                 while True:
@@ -316,6 +354,9 @@ def _copy_request_context(source: dict[str, Any], target: dict[str, Any]) -> Non
     request_id = source.get("requestId")
     if isinstance(request_id, str):
         target["requestId"] = request_id
+    session_id = source.get("sessionId")
+    if isinstance(session_id, str):
+        target["sessionId"] = session_id
     source_dir = source.get("sourceDir")
     if isinstance(source_dir, str):
         target["sourceDir"] = source_dir

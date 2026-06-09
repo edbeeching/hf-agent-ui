@@ -26,7 +26,7 @@ class DaemonWsServer:
 
     Client -> Server:
       { type: "pty.create", workDir, tool?, cols?, rows?, launchMode?, launchCommand?, launchLabel?, yoloMode?, worktree? }
-      { type: "pty.input", sessionId, data }
+      { type: "pty.input", sessionId, data, requestId? }
       { type: "pty.resize", sessionId, cols, rows }
       { type: "session.image.send", sessionId, filename, mimeType, dataBase64, prompt }
       { type: "session.stop", sessionId }
@@ -43,6 +43,7 @@ class DaemonWsServer:
 
     Server -> Client:
       { type: "pty.created", session: PtySessionInfo }
+      { type: "pty.input_ack", sessionId, requestId? }
       { type: "pty.output", sessionId, data }
       { type: "pty.exit", sessionId, code }
       { type: "session.image.sent", sessionId, path, mimeType, size, session }
@@ -165,15 +166,48 @@ class DaemonWsServer:
                     })
 
             case "pty.input":
-                session = self.manager.get(req.get("sessionId", ""))
+                session_id = req.get("sessionId", "")
+                if not isinstance(session_id, str):
+                    session_id = ""
+                request_id = req.get("requestId")
+                if not isinstance(request_id, str):
+                    request_id = None
+                session = self.manager.get(session_id)
                 if not session or not isinstance(session, PtySession):
-                    await self._send(ws, {
+                    response = {
                         "type": "error",
-                        "message": f"PTY session not found: {req.get('sessionId')}",
+                        "message": f"PTY session not found: {session_id or req.get('sessionId')}",
                         "requestType": msg_type,
-                    })
+                        "sessionId": session_id,
+                    }
+                    if request_id:
+                        response["requestId"] = request_id
+                    await self._send(ws, response)
                     return
-                session.write(req.get("data", ""))
+                data = req.get("data", "")
+                if not isinstance(data, str):
+                    data = ""
+                try:
+                    if not session.write(data):
+                        raise RuntimeError(f"PTY session is not running: {session.id}")
+                except (OSError, RuntimeError) as exc:
+                    response = {
+                        "type": "error",
+                        "message": str(exc),
+                        "requestType": msg_type,
+                        "sessionId": session.id,
+                    }
+                    if request_id:
+                        response["requestId"] = request_id
+                    await self._send(ws, response)
+                    return
+                response = {
+                    "type": "pty.input_ack",
+                    "sessionId": session.id,
+                }
+                if request_id:
+                    response["requestId"] = request_id
+                await self._send(ws, response)
 
             case "pty.resize":
                 session = self.manager.get(req.get("sessionId", ""))
