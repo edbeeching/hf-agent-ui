@@ -42,6 +42,7 @@ function App() {
     sessions,
     worktreeLists,
     ptyOutput,
+    ptyInputDelivery,
     lastError,
     createPtySession,
     listWorktrees,
@@ -71,6 +72,7 @@ function App() {
     .filter(session => session.needs_input || session.agent_state === 'done').length
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
+  const selectedInputDelivery = activeSelected ? ptyInputDelivery.get(activeSelected.sessionId) || null : null
   const newSessionDaemons = newSessionDaemonIds
     ? newSessionDaemonIds.map(id => daemons.find(daemon => daemon.id === id)).filter((daemon): daemon is Daemon => Boolean(daemon))
     : []
@@ -160,14 +162,6 @@ function App() {
         <div className="sidebar-title">
           <div className="sidebar-title-main">
             <h1>hf-agent-ui</h1>
-            {auth.user && (
-              <div className="user-row">
-                <span className="user-name" title={auth.user.username}>{auth.user.username}</span>
-                <a className="logout-link" href={auth.logoutUrl}>
-                  Logout
-                </a>
-              </div>
-            )}
           </div>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
             {connected ? 'Connected' : 'Disconnected'}
@@ -208,6 +202,17 @@ function App() {
           }}
         />
         <ConnectDaemonPanel daemons={daemons} />
+        {auth.user && (
+          <div className="sidebar-user-row">
+            <div className="user-identity">
+              <span className="signed-in-label">Signed in as</span>
+              <span className="user-name" title={auth.user.username}>{auth.user.username}</span>
+            </div>
+            <a className="logout-link" href={auth.logoutUrl}>
+              Logout
+            </a>
+          </div>
+        )}
       </aside>
 
       <main className={`main-panel ${activeMobileView === 'terminal' ? 'mobile-active' : ''}`}>
@@ -219,9 +224,11 @@ function App() {
           needsInput={Boolean(activeSession?.needs_input)}
           inputReason={activeSession?.needs_input_reason || null}
           inputKind={activeSession?.needs_input_kind || null}
+          inputDelivery={selectedInputDelivery}
           tool={activeSession?.tool}
           onInput={data => {
-            if (activeSelected) sendPtyInput(activeSelected.daemonId, activeSelected.sessionId, data)
+            if (activeSelected) return sendPtyInput(activeSelected.daemonId, activeSelected.sessionId, data)
+            return false
           }}
           onSendImage={(image: SessionImagePayload) => {
             if (activeSelected) sendSessionImage(activeSelected.daemonId, activeSelected.sessionId, image)

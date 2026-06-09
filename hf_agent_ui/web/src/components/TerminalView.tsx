@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type For
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import type { InputRequiredKind, SessionImagePayload } from '../hooks/useAgentUi'
+import type { InputRequiredKind, PtyInputDeliveryState, SessionImagePayload } from '../hooks/useAgentUi'
 import 'xterm/css/xterm.css'
 
 const MAX_PASTE_IMAGE_BYTES = 8 * 1024 * 1024
@@ -11,7 +11,7 @@ const ALLOWED_PASTE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/web
 
 interface Props {
   sessionId: string
-  onInput: (data: string) => void
+  onInput: (data: string) => boolean
   onResize: (cols: number, rows: number) => void
   onSendImage?: (image: SessionImagePayload) => void
   output: string[]
@@ -19,6 +19,7 @@ interface Props {
   needsInput?: boolean
   inputReason?: string | null
   inputKind?: InputRequiredKind | null
+  inputDelivery?: PtyInputDeliveryState | null
   tool?: string
 }
 
@@ -32,6 +33,7 @@ export function TerminalView({
   needsInput = false,
   inputReason = null,
   inputKind = null,
+  inputDelivery = null,
   tool,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -48,6 +50,9 @@ export function TerminalView({
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [mobileInput, setMobileInput] = useState('')
+  const terminalNotice = inputDelivery?.status === 'failed'
+    ? inputDelivery.message || 'Input was not delivered.'
+    : null
 
   const scheduleTerminalLayout = useCallback((follow: boolean, forceFollow = false): void => {
     if (!termRef.current || !fitRef.current) return
@@ -351,6 +356,11 @@ export function TerminalView({
           <button type="button" onClick={() => setPasteNotice(null)} aria-label="Dismiss screenshot notice">
             x
           </button>
+        </div>
+      )}
+      {terminalNotice && (
+        <div className="terminal-input-notice" role="status">
+          {terminalNotice}
         </div>
       )}
       {pendingScreenshot && (
