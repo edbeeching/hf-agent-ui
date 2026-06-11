@@ -4,7 +4,6 @@ import { ensureUiTokenCookie, initializeUiTokenFromUrl, uiAuthFetch, uiWebSocket
 type JsonObject = Record<string, unknown>
 const AGENT_WORKING_WINDOW_MS = 20_000
 const WORKTREE_LIST_TIMEOUT_MS = 10_000
-const PTY_INPUT_PENDING_TTL_MS = 10_000
 
 initializeUiTokenFromUrl()
 
@@ -60,15 +59,6 @@ export interface WorktreeListResult {
   loading: boolean
   error: string | null
   requestId: string | null
-}
-
-export type PtyInputDeliveryStatus = 'idle' | 'pending' | 'failed'
-
-export interface PtyInputDeliveryState {
-  status: PtyInputDeliveryStatus
-  message: string | null
-  requestId: string | null
-  updatedAt: string | null
 }
 
 export type AgentState = 'blocked' | 'working' | 'done' | 'idle' | 'unknown'
@@ -139,7 +129,6 @@ interface AgentUiState {
   sessions: Map<string, SessionInfo[]>
   worktreeLists: Map<string, WorktreeListResult>
   ptyOutput: Map<string, string[]>  // sessionId -> raw terminal output chunks
-  ptyInputDelivery: Map<string, PtyInputDeliveryState>
   lastError: AgentUiError | null
 }
 
@@ -175,14 +164,12 @@ interface InputRequiredUpdate {
 export function useAgentUi(enabled = true) {
   const wsRef = useRef<WebSocket | null>(null)
   const worktreeListTimeoutsRef = useRef<Map<string, { requestId: string; timeoutId: number }>>(new Map())
-  const ptyInputTimeoutsRef = useRef<Map<string, { sessionId: string; timeoutId: number }>>(new Map())
   const [state, setState] = useState<AgentUiState>({
     connected: false,
     daemons: [],
     sessions: new Map(),
     worktreeLists: new Map(),
     ptyOutput: new Map(),
-    ptyInputDelivery: new Map(),
     lastError: null,
   })
 
@@ -304,26 +291,6 @@ export function useAgentUi(enabled = true) {
         break
       }
 
-      case 'pty.input_ack': {
-        if (!sessionId) return
-        const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
-        if (requestId) clearPtyInputTimeout(ptyInputTimeoutsRef.current, requestId)
-        setState(s => {
-          const ptyInputDelivery = new Map(s.ptyInputDelivery)
-          const current = ptyInputDelivery.get(sessionId)
-          if (requestId && current?.requestId && current.requestId !== requestId) return s
-          ptyInputDelivery.set(sessionId, {
-            status: 'idle',
-            message: null,
-            requestId: null,
-            updatedAt: new Date().toISOString(),
-          })
-          return { ...s, ptyInputDelivery }
-        })
-        updateSessionInputRequired(sessionId, false)
-        break
-      }
-
       case 'session.subscribed': {
         if (!daemonId || !msg.session) return
         const session = normalizeSession(msg.session)
@@ -387,7 +354,6 @@ export function useAgentUi(enabled = true) {
 
       case 'session.removed': {
         if (!daemonId || !sessionId) return
-        clearPtyInputTimeoutsForSession(ptyInputTimeoutsRef.current, sessionId)
         setState(s => {
           const sessions = new Map(s.sessions)
           const list = sessions.get(daemonId) || []
@@ -396,10 +362,7 @@ export function useAgentUi(enabled = true) {
           const ptyOutput = new Map(s.ptyOutput)
           ptyOutput.delete(sessionId)
 
-          const ptyInputDelivery = new Map(s.ptyInputDelivery)
-          ptyInputDelivery.delete(sessionId)
-
-          return { ...s, sessions, ptyOutput, ptyInputDelivery }
+          return { ...s, sessions, ptyOutput }
         })
         break
       }
@@ -440,26 +403,6 @@ export function useAgentUi(enabled = true) {
         const rawMessage = typeof msg.message === 'string' && msg.message.trim()
           ? msg.message.trim()
           : 'Unknown error'
-        if (requestType === 'pty.input') {
-          const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
-          const inputSessionId = sessionId || (requestId ? ptyInputTimeoutsRef.current.get(requestId)?.sessionId : null)
-          if (requestId) clearPtyInputTimeout(ptyInputTimeoutsRef.current, requestId)
-          if (inputSessionId) {
-            setState(s => {
-              const ptyInputDelivery = new Map(s.ptyInputDelivery)
-              const current = ptyInputDelivery.get(inputSessionId)
-              if (requestId && current?.requestId && current.requestId !== requestId) return s
-              ptyInputDelivery.set(inputSessionId, {
-                status: 'failed',
-                message: rawMessage,
-                requestId: null,
-                updatedAt: new Date().toISOString(),
-              })
-              return { ...s, ptyInputDelivery }
-            })
-            break
-          }
-        }
         if (requestType === 'worktrees.list' && daemonId && typeof msg.sourceDir === 'string') {
           const key = worktreeListKey(daemonId, msg.sourceDir || '.')
           const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
@@ -510,10 +453,6 @@ export function useAgentUi(enabled = true) {
       window.clearTimeout(timeoutId)
     }
     worktreeListTimeoutsRef.current.clear()
-    for (const { timeoutId } of ptyInputTimeoutsRef.current.values()) {
-      window.clearTimeout(timeoutId)
-    }
-    ptyInputTimeoutsRef.current.clear()
   }, [])
 
   useEffect(() => {
@@ -539,25 +478,7 @@ export function useAgentUi(enabled = true) {
 
       ws.onclose = () => {
         if (disposed) return
-        const pendingInputs = [...ptyInputTimeoutsRef.current.values()]
-        for (const { timeoutId } of pendingInputs) {
-          window.clearTimeout(timeoutId)
-        }
-        ptyInputTimeoutsRef.current.clear()
-        setState(s => {
-          if (pendingInputs.length === 0) return { ...s, connected: false }
-          const ptyInputDelivery = new Map(s.ptyInputDelivery)
-          const failedAt = new Date().toISOString()
-          for (const { sessionId } of pendingInputs) {
-            ptyInputDelivery.set(sessionId, {
-              status: 'failed',
-              message: 'Connection lost before input delivery was confirmed.',
-              requestId: null,
-              updatedAt: failedAt,
-            })
-          }
-          return { ...s, connected: false, ptyInputDelivery }
-        })
+        setState(s => ({ ...s, connected: false }))
         setTimeout(() => { void connect() }, 2000)
       }
 
@@ -664,50 +585,7 @@ export function useAgentUi(enabled = true) {
   }, [send])
 
   const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string): boolean => {
-    const requestId = newRequestId()
-    const sent = send({ type: 'pty.input', daemonId, sessionId, data, requestId })
-    const updatedAt = new Date().toISOString()
-    clearPtyInputTimeoutsForSession(ptyInputTimeoutsRef.current, sessionId)
-    if (!sent) {
-      setState(s => {
-        const ptyInputDelivery = new Map(s.ptyInputDelivery)
-        ptyInputDelivery.set(sessionId, {
-          status: 'failed',
-          message: 'Connection lost. Input was not sent.',
-          requestId: null,
-          updatedAt,
-        })
-        return { ...s, ptyInputDelivery }
-      })
-      return false
-    }
-    const timeoutId = window.setTimeout(() => {
-      ptyInputTimeoutsRef.current.delete(requestId)
-      setState(s => {
-        const ptyInputDelivery = new Map(s.ptyInputDelivery)
-        const current = ptyInputDelivery.get(sessionId)
-        if (current?.requestId !== requestId) return s
-        ptyInputDelivery.set(sessionId, {
-          status: 'idle',
-          message: null,
-          requestId: null,
-          updatedAt: new Date().toISOString(),
-        })
-        return { ...s, ptyInputDelivery }
-      })
-    }, PTY_INPUT_PENDING_TTL_MS)
-    ptyInputTimeoutsRef.current.set(requestId, { sessionId, timeoutId })
-    setState(s => {
-      const ptyInputDelivery = new Map(s.ptyInputDelivery)
-      ptyInputDelivery.set(sessionId, {
-        status: 'pending',
-        message: null,
-        requestId,
-        updatedAt,
-      })
-      return { ...s, ptyInputDelivery }
-    })
-    return sent
+    return send({ type: 'pty.input', daemonId, sessionId, data })
   }, [send])
 
   const sendSessionImage = useCallback((
@@ -737,7 +615,6 @@ export function useAgentUi(enabled = true) {
 
   const removeSession = useCallback((daemonId: string, sessionId: string) => {
     send({ type: 'session.remove', daemonId, sessionId })
-    clearPtyInputTimeoutsForSession(ptyInputTimeoutsRef.current, sessionId)
     setState(s => {
       const sessions = new Map(s.sessions)
       const list = sessions.get(daemonId) || []
@@ -746,10 +623,7 @@ export function useAgentUi(enabled = true) {
       const ptyOutput = new Map(s.ptyOutput)
       ptyOutput.delete(sessionId)
 
-      const ptyInputDelivery = new Map(s.ptyInputDelivery)
-      ptyInputDelivery.delete(sessionId)
-
-      return { ...s, sessions, ptyOutput, ptyInputDelivery }
+      return { ...s, sessions, ptyOutput }
     })
   }, [send])
 
@@ -952,27 +826,6 @@ function clearWorktreeListTimeout(
   if (!pending || (requestId && pending.requestId !== requestId)) return
   window.clearTimeout(pending.timeoutId)
   timeouts.delete(key)
-}
-
-function clearPtyInputTimeout(
-  timeouts: Map<string, { sessionId: string; timeoutId: number }>,
-  requestId: string,
-) {
-  const pending = timeouts.get(requestId)
-  if (!pending) return
-  window.clearTimeout(pending.timeoutId)
-  timeouts.delete(requestId)
-}
-
-function clearPtyInputTimeoutsForSession(
-  timeouts: Map<string, { sessionId: string; timeoutId: number }>,
-  sessionId: string,
-) {
-  for (const [requestId, pending] of [...timeouts.entries()]) {
-    if (pending.sessionId !== sessionId) continue
-    window.clearTimeout(pending.timeoutId)
-    timeouts.delete(requestId)
-  }
 }
 
 function newRequestId(): string {

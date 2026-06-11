@@ -430,6 +430,43 @@ async def test_send_pty_input_and_stream_output_via_ws(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_send_pty_input_without_request_id_streams_without_ack(tmp_path: Path) -> None:
+    """Plain terminal input should write without emitting a delivery ack."""
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+                "tool": "mock",
+            })
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            await ws.send(json.dumps({
+                "type": "pty.input",
+                "sessionId": session_id,
+                "data": "no ack please\r",
+            }))
+
+            msgs = await _recv_until(
+                ws,
+                lambda m: m.get("type") == "pty.output" and "no ack please" in m.get("data", ""),
+            )
+
+            assert all(m["type"] != "pty.input_ack" for m in msgs)
+            output = "".join(m.get("data", "") for m in msgs if m.get("type") == "pty.output")
+            assert "no ack please" in output
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
 async def test_session_list_via_ws(tmp_path: Path) -> None:
     """session.list should return all PTY sessions."""
     manager = SessionManager(tmp_path / "state.json")
