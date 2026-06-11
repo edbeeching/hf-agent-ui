@@ -160,14 +160,6 @@ function App() {
         <div className="sidebar-title">
           <div className="sidebar-title-main">
             <h1>hf-agent-ui</h1>
-            {auth.user && (
-              <div className="user-row">
-                <span className="user-name" title={auth.user.username}>{auth.user.username}</span>
-                <a className="logout-link" href={auth.logoutUrl}>
-                  Logout
-                </a>
-              </div>
-            )}
           </div>
           <span className={`connection-badge ${connected ? 'connected' : ''}`}>
             {connected ? 'Connected' : 'Disconnected'}
@@ -208,6 +200,17 @@ function App() {
           }}
         />
         <ConnectDaemonPanel daemons={daemons} />
+        {auth.user && (
+          <div className="sidebar-user-row">
+            <div className="user-identity">
+              <span className="signed-in-label">Signed in as</span>
+              <span className="user-name" title={auth.user.username}>{auth.user.username}</span>
+            </div>
+            <a className="logout-link" href={auth.logoutUrl}>
+              Logout
+            </a>
+          </div>
+        )}
       </aside>
 
       <main className={`main-panel ${activeMobileView === 'terminal' ? 'mobile-active' : ''}`}>

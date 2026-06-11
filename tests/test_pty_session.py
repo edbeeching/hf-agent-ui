@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shlex
 import signal
@@ -13,6 +14,8 @@ from hf_agent_ui.daemon.pty_session import (
     TOOL_COMMANDS,
     PtySession,
     _codex_hook_config_args,
+    _detect_action_required,
+    _detect_claude_input_hook,
     _detect_claude_notification,
     _detect_codex_permission_request,
 )
@@ -120,7 +123,7 @@ def test_codex_hook_config_is_added_when_hook_enabled(tmp_path: Path) -> None:
 
     assert args[0] == "codex"
     assert "-c" in args
-    assert "features.codex_hooks=true" in args
+    assert "features.hooks=true" in args
     assert any("hooks.PermissionRequest" in arg for arg in args)
     assert args[-2:] == ["--cd", str(tmp_path.resolve())]
 
@@ -258,34 +261,95 @@ def test_non_codex_session_rejects_image_attach(tmp_path: Path) -> None:
 def test_codex_hook_config_runs_hf_agent_ui_hook() -> None:
     config_args = _codex_hook_config_args()
 
-    assert "features.codex_hooks=true" in config_args
+    assert "features.hooks=true" in config_args
     assert any("hf_agent_ui.daemon.codex_hook" in arg for arg in config_args)
 
 
-def test_claude_notification_type_maps_to_input_signal() -> None:
-    signal = _detect_claude_notification({
-        "hook_event_name": "Notification",
-        "notification_type": "permission_prompt",
-        "title": "Permission needed",
-        "message": "Claude needs your permission to use Bash",
+def test_claude_input_hook_install_replaces_notification_hook(tmp_path: Path) -> None:
+    command = f"{shlex.quote(sys.executable)} -m hf_agent_ui.daemon.claude_hook"
+    settings_dir = tmp_path / ".claude"
+    settings_dir.mkdir()
+    settings_file = settings_dir / "settings.local.json"
+    settings_file.write_text(json.dumps({
+        "hooks": {
+            "Notification": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": command},
+                        {"type": "command", "command": "echo keep"},
+                    ],
+                },
+                {
+                    "matcher": "idle_prompt",
+                    "hooks": [{"type": "command", "command": command}],
+                },
+            ],
+            "PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo policy"}]},
+            ],
+        },
+    }))
+    session = PtySession(work_dir=str(tmp_path), tool="claude")
+
+    session._install_claude_input_hooks()
+
+    hooks = json.loads(settings_file.read_text())["hooks"]
+    assert "Notification" in hooks
+    assert hooks["Notification"] == [{"hooks": [{"type": "command", "command": "echo keep"}]}]
+    assert hooks["PreToolUse"] == [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo policy"}]},
+    ]
+    for event_name in ("PermissionRequest", "Elicitation"):
+        assert any(
+            hook.get("command") == command
+            for group in hooks[event_name]
+            for hook in group["hooks"]
+        )
+
+
+def test_claude_permission_request_maps_to_input_signal() -> None:
+    signal = _detect_claude_input_hook({
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "tool_input": {
+            "description": "Run tests outside the sandbox",
+            "command": "pytest",
+        },
     })
 
     assert signal is not None
     assert signal.kind == "permission"
-    assert signal.title == "Permission needed"
-    assert signal.reason == "Claude needs your permission to use Bash"
+    assert signal.title == "Claude approval required"
+    assert signal.reason == "Run tests outside the sandbox"
+    assert signal.tool_name == "Bash"
 
 
-def test_claude_idle_notification_maps_to_prompt_signal() -> None:
-    signal = _detect_claude_notification({
-        "hook_event_name": "Notification",
-        "notification_type": "idle_prompt",
-        "message": "Claude is waiting for your input",
+def test_claude_elicitation_maps_to_prompt_signal() -> None:
+    signal = _detect_claude_input_hook({
+        "hook_event_name": "Elicitation",
+        "server_name": "docs",
+        "request": {
+            "title": "Choose source",
+            "question": "Which documentation source should Claude use?",
+        },
     })
 
     assert signal is not None
     assert signal.kind == "prompt"
-    assert "waiting" in signal.reason.lower()
+    assert signal.title == "Choose source"
+    assert signal.reason == "Which documentation source should Claude use?"
+    assert signal.tool_name == "docs"
+
+
+def test_claude_idle_notification_is_ignored() -> None:
+    event = {
+        "hook_event_name": "Notification",
+        "notification_type": "idle_prompt",
+        "message": "Claude is waiting for your input",
+    }
+
+    assert _detect_claude_notification(event) is None
+    assert _detect_claude_input_hook(event) is None
 
 
 def test_codex_permission_request_maps_to_input_signal() -> None:
@@ -302,6 +366,27 @@ def test_codex_permission_request_maps_to_input_signal() -> None:
     assert signal.title == "Codex approval required"
     assert signal.reason == "Run tests outside the sandbox"
     assert signal.tool_name == "Bash"
+
+
+def test_pty_action_required_ignores_hooked_tools() -> None:
+    output = "Claude needs your permission to use Bash\n"
+
+    assert _detect_action_required(output, "claude") is None
+    assert _detect_action_required(output, "codex") is None
+
+
+def test_pty_action_required_keeps_non_hook_fallback() -> None:
+    signal = _detect_action_required("Claude needs your permission to use Bash\n", "mock")
+
+    assert signal is not None
+    assert signal.kind == "permission"
+    assert signal.title == "Permission required"
+
+
+def test_pty_action_required_ignores_broad_non_prompt_text() -> None:
+    output = "This README explains approve flows, login setup, and y/n examples for users.\n"
+
+    assert _detect_action_required(output, "mock") is None
 
 
 def test_terminate_process_targets_process_group(monkeypatch, tmp_path: Path) -> None:

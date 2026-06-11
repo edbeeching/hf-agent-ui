@@ -500,10 +500,16 @@ export function useAgentUi(enabled = true) {
     }
   }, [enabled, fetchDaemons, handleMessage])
 
-  const send = useCallback((data: JsonObject) => {
+  const send = useCallback((data: JsonObject): boolean => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(data))
+      try {
+        wsRef.current.send(JSON.stringify(data))
+        return true
+      } catch {
+        return false
+      }
     }
+    return false
   }, [])
 
   useEffect(() => {
@@ -578,10 +584,9 @@ export function useAgentUi(enabled = true) {
     send({ type: 'worktrees.list', daemonId, sourceDir: normalizedSourceDir, requestId })
   }, [send])
 
-  const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string) => {
-    send({ type: 'pty.input', daemonId, sessionId, data })
-    if (data) updateSessionInputRequired(sessionId, false)
-  }, [send, updateSessionInputRequired])
+  const sendPtyInput = useCallback((daemonId: string, sessionId: string, data: string): boolean => {
+    return send({ type: 'pty.input', daemonId, sessionId, data })
+  }, [send])
 
   const sendSessionImage = useCallback((
     daemonId: string,

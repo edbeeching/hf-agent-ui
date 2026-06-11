@@ -80,12 +80,28 @@
   font-weight: 600;
 }
 
-.user-row {
-  display: flex;
+.sidebar-user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-top: 1px solid #30363d;
+  background: #0d1117;
+}
+
+.user-identity {
+  display: flex;
   min-width: 0;
-  gap: 7px;
-  margin-top: 2px;
+  align-items: center;
+  gap: 4px;
+}
+
+.signed-in-label {
+  flex: 0 0 auto;
+  color: #6e7681;
+  font-size: 11px;
 }
 
 .user-name {

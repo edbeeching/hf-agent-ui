@@ -410,6 +410,7 @@ async def test_send_pty_input_and_stream_output_via_ws(tmp_path: Path) -> None:
                 "type": "pty.input",
                 "sessionId": session_id,
                 "data": "test streaming\r",
+                "requestId": "input-stream",
             }))
 
             msgs = await _recv_until(
@@ -417,8 +418,48 @@ async def test_send_pty_input_and_stream_output_via_ws(tmp_path: Path) -> None:
                 lambda m: m.get("type") == "pty.output" and "test streaming" in m.get("data", ""),
             )
 
+            ack = next(m for m in msgs if m["type"] == "pty.input_ack")
+            assert ack["sessionId"] == session_id
+            assert ack["requestId"] == "input-stream"
             output = "".join(m.get("data", "") for m in msgs if m.get("type") == "pty.output")
             assert "test streaming" in output
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_register_mock_pty_tool")
+async def test_send_pty_input_without_request_id_streams_without_ack(tmp_path: Path) -> None:
+    """Plain terminal input should write without emitting a delivery ack."""
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {
+                "type": "pty.create",
+                "workDir": str(tmp_path),
+                "tool": "mock",
+            })
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            await ws.send(json.dumps({
+                "type": "pty.input",
+                "sessionId": session_id,
+                "data": "no ack please\r",
+            }))
+
+            msgs = await _recv_until(
+                ws,
+                lambda m: m.get("type") == "pty.output" and "no ack please" in m.get("data", ""),
+            )
+
+            assert all(m["type"] != "pty.input_ack" for m in msgs)
+            output = "".join(m.get("data", "") for m in msgs if m.get("type") == "pty.output")
+            assert "no ack please" in output
     finally:
         manager.stop_all()
         await server.stop()
@@ -539,6 +580,32 @@ async def test_input_required_event_and_clear_via_ws(tmp_path: Path) -> None:
             msgs = await _recv_until(ws, lambda m: m.get("type") == "session.input_resolved")
             resolved = next(m for m in msgs if m["type"] == "session.input_resolved")
             assert resolved["sessionId"] == session_id
+    finally:
+        manager.stop_all()
+        await server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_mock_codex_tool")
+async def test_codex_prompt_like_output_does_not_trigger_pty_input_required(tmp_path: Path) -> None:
+    """Codex input notifications should come from hooks, not terminal text."""
+    manager = SessionManager(tmp_path / "state.json")
+    server = DaemonWsServer(manager, 0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with websockets.connect(f"ws://localhost:{port}") as ws:
+            msgs = await _send_recv(ws, {"type": "pty.create", "workDir": str(tmp_path), "tool": "codex"})
+            session_id = next(m for m in msgs if m["type"] == "pty.created")["session"]["id"]
+
+            msgs = await _send_recv(ws, {
+                "type": "pty.input",
+                "sessionId": session_id,
+                "data": "__permission_prompt__\r",
+            })
+
+            assert all(msg.get("type") != "session.input_required" for msg in msgs)
     finally:
         manager.stop_all()
         await server.stop()
@@ -761,9 +828,13 @@ async def test_error_on_unknown_pty_session(tmp_path: Path) -> None:
                 "type": "pty.input",
                 "sessionId": "nonexistent-id",
                 "data": "hello",
+                "requestId": "missing-input",
             })
             error = next(m for m in msgs if m["type"] == "error")
             assert "not found" in error["message"].lower()
+            assert error["requestType"] == "pty.input"
+            assert error["sessionId"] == "nonexistent-id"
+            assert error["requestId"] == "missing-input"
     finally:
         manager.stop_all()
         await server.stop()
