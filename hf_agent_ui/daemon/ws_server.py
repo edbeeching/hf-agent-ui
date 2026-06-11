@@ -43,7 +43,7 @@ class DaemonWsServer:
 
     Server -> Client:
       { type: "pty.created", session: PtySessionInfo }
-      { type: "pty.input_ack", sessionId, requestId? }
+      { type: "pty.input_ack", sessionId, requestId }  # only when pty.input includes requestId
       { type: "pty.output", sessionId, data }
       { type: "pty.exit", sessionId, code }
       { type: "session.image.sent", sessionId, path, mimeType, size, session }
@@ -201,13 +201,12 @@ class DaemonWsServer:
                         response["requestId"] = request_id
                     await self._send(ws, response)
                     return
-                response = {
-                    "type": "pty.input_ack",
-                    "sessionId": session.id,
-                }
                 if request_id:
-                    response["requestId"] = request_id
-                await self._send(ws, response)
+                    await self._send(ws, {
+                        "type": "pty.input_ack",
+                        "sessionId": session.id,
+                        "requestId": request_id,
+                    })
 
             case "pty.resize":
                 session = self.manager.get(req.get("sessionId", ""))

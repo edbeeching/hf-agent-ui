@@ -33,7 +33,7 @@ class WsRelay:
       -> { type: "worktrees.list", daemonId, sourceDir, requestId? }
 
       <- { type: "pty.created", daemonId, session }
-      <- { type: "pty.input_ack", daemonId, sessionId, requestId? }
+      <- { type: "pty.input_ack", daemonId, sessionId, requestId }  # only when pty.input includes requestId
       <- { type: "pty.output", daemonId, sessionId, data }
       <- { type: "pty.exit", daemonId, sessionId, code }
       <- { type: "session.image.sent", daemonId, sessionId, path, mimeType, size, session }

@@ -42,7 +42,6 @@ function App() {
     sessions,
     worktreeLists,
     ptyOutput,
-    ptyInputDelivery,
     lastError,
     createPtySession,
     listWorktrees,
@@ -72,7 +71,6 @@ function App() {
     .filter(session => session.needs_input || session.agent_state === 'done').length
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
-  const selectedInputDelivery = activeSelected ? ptyInputDelivery.get(activeSelected.sessionId) || null : null
   const newSessionDaemons = newSessionDaemonIds
     ? newSessionDaemonIds.map(id => daemons.find(daemon => daemon.id === id)).filter((daemon): daemon is Daemon => Boolean(daemon))
     : []
@@ -224,11 +222,9 @@ function App() {
           needsInput={Boolean(activeSession?.needs_input)}
           inputReason={activeSession?.needs_input_reason || null}
           inputKind={activeSession?.needs_input_kind || null}
-          inputDelivery={selectedInputDelivery}
           tool={activeSession?.tool}
           onInput={data => {
-            if (activeSelected) return sendPtyInput(activeSelected.daemonId, activeSelected.sessionId, data)
-            return false
+            if (activeSelected) sendPtyInput(activeSelected.daemonId, activeSelected.sessionId, data)
           }}
           onSendImage={(image: SessionImagePayload) => {
             if (activeSelected) sendSessionImage(activeSelected.daemonId, activeSelected.sessionId, image)
