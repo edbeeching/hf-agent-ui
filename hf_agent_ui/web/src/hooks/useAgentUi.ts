@@ -129,6 +129,7 @@ interface AgentUiState {
   sessions: Map<string, SessionInfo[]>
   worktreeLists: Map<string, WorktreeListResult>
   ptyOutput: Map<string, string[]>  // sessionId -> raw terminal output chunks
+  ptyOutputEpoch: Map<string, number>
   lastError: AgentUiError | null
 }
 
@@ -170,6 +171,7 @@ export function useAgentUi(enabled = true) {
     sessions: new Map(),
     worktreeLists: new Map(),
     ptyOutput: new Map(),
+    ptyOutputEpoch: new Map(),
     lastError: null,
   })
 
@@ -301,8 +303,10 @@ export function useAgentUi(enabled = true) {
 
           const ptyOutput = new Map(s.ptyOutput)
           ptyOutput.set(session.id, [])
+          const ptyOutputEpoch = new Map(s.ptyOutputEpoch)
+          ptyOutputEpoch.set(session.id, (ptyOutputEpoch.get(session.id) || 0) + 1)
 
-          return { ...s, sessions, ptyOutput }
+          return { ...s, sessions, ptyOutput, ptyOutputEpoch }
         })
         break
       }
@@ -361,8 +365,10 @@ export function useAgentUi(enabled = true) {
 
           const ptyOutput = new Map(s.ptyOutput)
           ptyOutput.delete(sessionId)
+          const ptyOutputEpoch = new Map(s.ptyOutputEpoch)
+          ptyOutputEpoch.delete(sessionId)
 
-          return { ...s, sessions, ptyOutput }
+          return { ...s, sessions, ptyOutput, ptyOutputEpoch }
         })
         break
       }
@@ -622,8 +628,10 @@ export function useAgentUi(enabled = true) {
 
       const ptyOutput = new Map(s.ptyOutput)
       ptyOutput.delete(sessionId)
+      const ptyOutputEpoch = new Map(s.ptyOutputEpoch)
+      ptyOutputEpoch.delete(sessionId)
 
-      return { ...s, sessions, ptyOutput }
+      return { ...s, sessions, ptyOutput, ptyOutputEpoch }
     })
   }, [send])
 
