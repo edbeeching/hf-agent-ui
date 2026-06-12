@@ -15,6 +15,7 @@ interface Props {
   onResize: (cols: number, rows: number) => void
   onSendImage?: (image: SessionImagePayload) => void
   output: string[]
+  outputEpoch?: number
   visible?: boolean
   needsInput?: boolean
   inputReason?: string | null
@@ -28,6 +29,7 @@ export function TerminalView({
   onResize,
   onSendImage,
   output,
+  outputEpoch = 0,
   visible = true,
   needsInput = false,
   inputReason = null,
@@ -38,18 +40,49 @@ export function TerminalView({
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const writtenRef = useRef(0)
+  const outputEpochRef = useRef(outputEpoch)
   const onInputRef = useRef(onInput)
   const onResizeRef = useRef(onResize)
   const pendingPreviewUrlRef = useRef<string | null>(null)
   const followOutputRef = useRef(true)
   const layoutFrameRef = useRef<number | null>(null)
+  const scrollFrameRef = useRef<number | null>(null)
   const visibleRef = useRef(visible)
   const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [mobileInput, setMobileInput] = useState('')
 
-  const scheduleTerminalLayout = useCallback((follow: boolean, forceFollow = false): void => {
+  const scheduleTerminalScroll = useCallback((forceFollow = false): void => {
+    if (!termRef.current) return
+    if (!visibleRef.current) {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
+      }
+      return
+    }
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      if (!visibleRef.current) return
+      const term = termRef.current
+      if (!term) return
+      if (forceFollow) {
+        followOutputRef.current = true
+      }
+      if (forceFollow || followOutputRef.current || isTerminalAtBottom(term)) {
+        scrollTerminalToBottom(term)
+        setShowScrollButton(false)
+      } else {
+        setShowScrollButton(true)
+      }
+    })
+  }, [])
+
+  const scheduleTerminalFit = useCallback((follow: boolean, forceFollow = false): void => {
     if (!termRef.current || !fitRef.current) return
     if (!visibleRef.current) {
       if (layoutFrameRef.current !== null) {
@@ -69,7 +102,9 @@ export function TerminalView({
       if (!term) return
       if (follow && (forceFollow || followOutputRef.current)) {
         scrollTerminalToBottom(term)
-        followOutputRef.current = true
+        if (forceFollow) {
+          followOutputRef.current = true
+        }
         setShowScrollButton(false)
       } else {
         setShowScrollButton(!isTerminalAtBottom(term))
@@ -82,6 +117,10 @@ export function TerminalView({
     if (!visible && layoutFrameRef.current !== null) {
       window.cancelAnimationFrame(layoutFrameRef.current)
       layoutFrameRef.current = null
+    }
+    if (!visible && scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
     }
   }, [visible])
 
@@ -102,6 +141,10 @@ export function TerminalView({
       if (layoutFrameRef.current !== null) {
         window.cancelAnimationFrame(layoutFrameRef.current)
         layoutFrameRef.current = null
+      }
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
       }
     }
   }, [])
@@ -155,7 +198,7 @@ export function TerminalView({
     // Send keystrokes to the session
     term.onData((data) => {
       followOutputRef.current = true
-      scheduleTerminalLayout(true, true)
+      scheduleTerminalScroll(true)
       onInputRef.current(data)
     })
 
@@ -167,7 +210,7 @@ export function TerminalView({
     // Window resize
     const handleResize = () => {
       term.options.fontSize = terminalFontSize()
-      scheduleTerminalLayout(followOutputRef.current)
+      scheduleTerminalFit(followOutputRef.current)
     }
     window.addEventListener('resize', handleResize)
     const observer = new ResizeObserver(handleResize)
@@ -189,28 +232,46 @@ export function TerminalView({
         window.cancelAnimationFrame(layoutFrameRef.current)
         layoutFrameRef.current = null
       }
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
+      }
       term.dispose()
       termRef.current = null
       fitRef.current = null
       writtenRef.current = 0
       followOutputRef.current = true
     }
-  }, [scheduleTerminalLayout, sessionId])
+  }, [scheduleTerminalFit, scheduleTerminalScroll, sessionId])
+
+  useEffect(() => {
+    if (outputEpochRef.current === outputEpoch) return
+    outputEpochRef.current = outputEpoch
+    writtenRef.current = 0
+    const term = termRef.current
+    if (!term) return
+    term.clear()
+    setShowScrollButton(false)
+  }, [outputEpoch])
 
   // Write new output to terminal
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    const start = writtenRef.current
+    let start = writtenRef.current
+    if (output.length < start) {
+      term.clear()
+      writtenRef.current = 0
+      start = 0
+      setShowScrollButton(false)
+    }
     if (start >= output.length) return
     const shouldFollow = followOutputRef.current || isTerminalAtBottom(term)
     for (let i = start; i < output.length; i++) {
       const chunk = output[i]
       if (i === output.length - 1 && shouldFollow) {
         term.write(chunk, () => {
-          scheduleTerminalLayout(true)
-          followOutputRef.current = true
-          setShowScrollButton(false)
+          scheduleTerminalScroll()
         })
       } else {
         term.write(chunk)
@@ -220,12 +281,12 @@ export function TerminalView({
     if (!shouldFollow) {
       setShowScrollButton(true)
     }
-  }, [output, scheduleTerminalLayout])
+  }, [output, scheduleTerminalScroll])
 
   useEffect(() => {
     if (!visible || !fitRef.current) return
-    scheduleTerminalLayout(followOutputRef.current)
-  }, [visible, sessionId, needsInput, scheduleTerminalLayout])
+    scheduleTerminalFit(followOutputRef.current)
+  }, [visible, sessionId, needsInput, scheduleTerminalFit])
 
   if (!sessionId) {
     return (
@@ -309,14 +370,14 @@ export function TerminalView({
   function handleScrollToBottom(): void {
     if (!termRef.current) return
     followOutputRef.current = true
-    scheduleTerminalLayout(true, true)
+    scheduleTerminalScroll(true)
     setShowScrollButton(false)
   }
 
   function sendTerminalInput(data: string): void {
     if (!data) return
     followOutputRef.current = true
-    scheduleTerminalLayout(true, true)
+    scheduleTerminalScroll(true)
     onInputRef.current(data)
   }
 
