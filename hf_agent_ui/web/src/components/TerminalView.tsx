@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -8,6 +8,7 @@ import 'xterm/css/xterm.css'
 const MAX_PASTE_IMAGE_BYTES = 8 * 1024 * 1024
 const DEFAULT_SCREENSHOT_PROMPT = 'Use this screenshot as context.'
 const ALLOWED_PASTE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+const MIN_TERMINAL_FIT_SIZE = 24
 
 interface Props {
   sessionId: string
@@ -45,13 +46,25 @@ export function TerminalView({
   const onResizeRef = useRef(onResize)
   const pendingPreviewUrlRef = useRef<string | null>(null)
   const followOutputRef = useRef(true)
+  const userScrollLockRef = useRef(false)
   const layoutFrameRef = useRef<number | null>(null)
+  const settledLayoutFrameRef = useRef<number | null>(null)
+  const settledLayoutTimeoutRef = useRef<number | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
   const visibleRef = useRef(visible)
   const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null)
   const [pasteNotice, setPasteNotice] = useState<string | null>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
-  const [mobileInput, setMobileInput] = useState('')
+
+  const stopFollowingOutput = useCallback((): void => {
+    userScrollLockRef.current = true
+    followOutputRef.current = false
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current)
+      scrollFrameRef.current = null
+    }
+    setShowScrollButton(true)
+  }, [])
 
   const scheduleTerminalScroll = useCallback((forceFollow = false): void => {
     if (!termRef.current) return
@@ -71,9 +84,10 @@ export function TerminalView({
       const term = termRef.current
       if (!term) return
       if (forceFollow) {
+        userScrollLockRef.current = false
         followOutputRef.current = true
       }
-      if (forceFollow || followOutputRef.current || isTerminalAtBottom(term)) {
+      if (forceFollow || (!userScrollLockRef.current && (followOutputRef.current || isTerminalAtBottom(term)))) {
         scrollTerminalToBottom(term)
         setShowScrollButton(false)
       } else {
@@ -82,47 +96,101 @@ export function TerminalView({
     })
   }, [])
 
+  const cancelImmediateTerminalFit = useCallback((): void => {
+    if (layoutFrameRef.current !== null) {
+      window.cancelAnimationFrame(layoutFrameRef.current)
+      layoutFrameRef.current = null
+    }
+  }, [])
+
+  const cancelSettledTerminalFit = useCallback((): void => {
+    if (settledLayoutFrameRef.current !== null) {
+      window.cancelAnimationFrame(settledLayoutFrameRef.current)
+      settledLayoutFrameRef.current = null
+    }
+    if (settledLayoutTimeoutRef.current !== null) {
+      window.clearTimeout(settledLayoutTimeoutRef.current)
+      settledLayoutTimeoutRef.current = null
+    }
+  }, [])
+
+  const runTerminalFit = useCallback((follow: boolean, forceFollow = false): boolean => {
+    const terminalElement = containerRef.current
+    const term = termRef.current
+    const fitAddon = fitRef.current
+    if (!visibleRef.current || !terminalElement || !term || !fitAddon) return false
+
+    const { width, height } = terminalElement.getBoundingClientRect()
+    if (width < MIN_TERMINAL_FIT_SIZE || height < MIN_TERMINAL_FIT_SIZE) {
+      return false
+    }
+
+    fitAddon.fit()
+    if (forceFollow) {
+      userScrollLockRef.current = false
+      followOutputRef.current = true
+    }
+    if (follow && (forceFollow || (!userScrollLockRef.current && followOutputRef.current))) {
+      scrollTerminalToBottom(term)
+      setShowScrollButton(false)
+    } else {
+      setShowScrollButton(!isTerminalAtBottom(term))
+    }
+    return true
+  }, [])
+
   const scheduleTerminalFit = useCallback((follow: boolean, forceFollow = false): void => {
     if (!termRef.current || !fitRef.current) return
     if (!visibleRef.current) {
-      if (layoutFrameRef.current !== null) {
-        window.cancelAnimationFrame(layoutFrameRef.current)
-        layoutFrameRef.current = null
-      }
+      cancelImmediateTerminalFit()
       return
     }
-    if (layoutFrameRef.current !== null) {
-      window.cancelAnimationFrame(layoutFrameRef.current)
-    }
+    cancelImmediateTerminalFit()
     layoutFrameRef.current = window.requestAnimationFrame(() => {
       layoutFrameRef.current = null
-      if (!visibleRef.current) return
-      fitRef.current?.fit()
-      const term = termRef.current
-      if (!term) return
-      if (follow && (forceFollow || followOutputRef.current)) {
-        scrollTerminalToBottom(term)
-        if (forceFollow) {
-          followOutputRef.current = true
-        }
-        setShowScrollButton(false)
-      } else {
-        setShowScrollButton(!isTerminalAtBottom(term))
-      }
+      runTerminalFit(follow, forceFollow)
     })
-  }, [])
+  }, [cancelImmediateTerminalFit, runTerminalFit])
+
+  const scheduleSettledTerminalFit = useCallback((follow: boolean, forceFollow = false): void => {
+    if (!termRef.current || !fitRef.current) return
+    if (!visibleRef.current) {
+      cancelImmediateTerminalFit()
+      cancelSettledTerminalFit()
+      return
+    }
+
+    scheduleTerminalFit(follow, forceFollow)
+    cancelSettledTerminalFit()
+    settledLayoutFrameRef.current = window.requestAnimationFrame(() => {
+      settledLayoutFrameRef.current = null
+      settledLayoutFrameRef.current = window.requestAnimationFrame(() => {
+        settledLayoutFrameRef.current = null
+        runTerminalFit(follow, forceFollow)
+      })
+    })
+    settledLayoutTimeoutRef.current = window.setTimeout(() => {
+      settledLayoutTimeoutRef.current = null
+      runTerminalFit(follow, forceFollow)
+    }, 120)
+  }, [
+    cancelImmediateTerminalFit,
+    cancelSettledTerminalFit,
+    runTerminalFit,
+    scheduleTerminalFit,
+  ])
 
   useEffect(() => {
     visibleRef.current = visible
-    if (!visible && layoutFrameRef.current !== null) {
-      window.cancelAnimationFrame(layoutFrameRef.current)
-      layoutFrameRef.current = null
+    if (!visible) {
+      cancelImmediateTerminalFit()
+      cancelSettledTerminalFit()
     }
     if (!visible && scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current)
       scrollFrameRef.current = null
     }
-  }, [visible])
+  }, [cancelImmediateTerminalFit, cancelSettledTerminalFit, visible])
 
   useEffect(() => {
     onInputRef.current = onInput
@@ -142,6 +210,14 @@ export function TerminalView({
         window.cancelAnimationFrame(layoutFrameRef.current)
         layoutFrameRef.current = null
       }
+      if (settledLayoutFrameRef.current !== null) {
+        window.cancelAnimationFrame(settledLayoutFrameRef.current)
+        settledLayoutFrameRef.current = null
+      }
+      if (settledLayoutTimeoutRef.current !== null) {
+        window.clearTimeout(settledLayoutTimeoutRef.current)
+        settledLayoutTimeoutRef.current = null
+      }
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current)
         scrollFrameRef.current = null
@@ -152,6 +228,7 @@ export function TerminalView({
   // Initialize terminal
   useEffect(() => {
     if (!containerRef.current || termRef.current) return
+    const terminalElement = containerRef.current
 
     const term = new Terminal({
       cursorBlink: true,
@@ -189,14 +266,14 @@ export function TerminalView({
     const webLinksAddon = new WebLinksAddon((_event, uri) => openTerminalLink(uri))
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
-    term.open(containerRef.current)
-    configureTerminalTextarea(containerRef.current)
-    fitAddon.fit()
+    term.open(terminalElement)
+    configureTerminalTextarea(terminalElement)
     followOutputRef.current = true
     setShowScrollButton(false)
 
     // Send keystrokes to the session
     term.onData((data) => {
+      userScrollLockRef.current = false
       followOutputRef.current = true
       scheduleTerminalScroll(true)
       onInputRef.current(data)
@@ -214,24 +291,36 @@ export function TerminalView({
     }
     window.addEventListener('resize', handleResize)
     const observer = new ResizeObserver(handleResize)
-    observer.observe(containerRef.current)
+    observer.observe(terminalElement)
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) {
+        stopFollowingOutput()
+      }
+    }
+    terminalElement.addEventListener('wheel', handleWheel, { passive: true })
     const scrollDisposable = term.onScroll(() => {
       const atBottom = isTerminalAtBottom(term)
-      followOutputRef.current = atBottom
+      if (atBottom) {
+        userScrollLockRef.current = false
+        followOutputRef.current = true
+      } else {
+        userScrollLockRef.current = true
+        followOutputRef.current = false
+      }
       setShowScrollButton(!atBottom)
     })
 
     termRef.current = term
     fitRef.current = fitAddon
+    scheduleSettledTerminalFit(true, true)
 
     return () => {
       window.removeEventListener('resize', handleResize)
+      terminalElement.removeEventListener('wheel', handleWheel)
       observer.disconnect()
       scrollDisposable.dispose()
-      if (layoutFrameRef.current !== null) {
-        window.cancelAnimationFrame(layoutFrameRef.current)
-        layoutFrameRef.current = null
-      }
+      cancelImmediateTerminalFit()
+      cancelSettledTerminalFit()
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current)
         scrollFrameRef.current = null
@@ -241,8 +330,17 @@ export function TerminalView({
       fitRef.current = null
       writtenRef.current = 0
       followOutputRef.current = true
+      userScrollLockRef.current = false
     }
-  }, [scheduleTerminalFit, scheduleTerminalScroll, sessionId])
+  }, [
+    cancelImmediateTerminalFit,
+    cancelSettledTerminalFit,
+    scheduleSettledTerminalFit,
+    scheduleTerminalFit,
+    scheduleTerminalScroll,
+    sessionId,
+    stopFollowingOutput,
+  ])
 
   useEffect(() => {
     if (outputEpochRef.current === outputEpoch) return
@@ -266,7 +364,7 @@ export function TerminalView({
       setShowScrollButton(false)
     }
     if (start >= output.length) return
-    const shouldFollow = followOutputRef.current || isTerminalAtBottom(term)
+    const shouldFollow = !userScrollLockRef.current && (followOutputRef.current || isTerminalAtBottom(term))
     for (let i = start; i < output.length; i++) {
       const chunk = output[i]
       if (i === output.length - 1 && shouldFollow) {
@@ -285,8 +383,8 @@ export function TerminalView({
 
   useEffect(() => {
     if (!visible || !fitRef.current) return
-    scheduleTerminalFit(followOutputRef.current)
-  }, [visible, sessionId, needsInput, scheduleTerminalFit])
+    scheduleSettledTerminalFit(followOutputRef.current)
+  }, [visible, sessionId, needsInput, scheduleSettledTerminalFit])
 
   if (!sessionId) {
     return (
@@ -369,29 +467,10 @@ export function TerminalView({
 
   function handleScrollToBottom(): void {
     if (!termRef.current) return
+    userScrollLockRef.current = false
     followOutputRef.current = true
     scheduleTerminalScroll(true)
     setShowScrollButton(false)
-  }
-
-  function sendTerminalInput(data: string): void {
-    if (!data) return
-    followOutputRef.current = true
-    scheduleTerminalScroll(true)
-    onInputRef.current(data)
-  }
-
-  function handleMobileSend(): void {
-    const text = mobileInput
-    if (!text) return
-    sendTerminalInput(`${text}\r`)
-    setMobileInput('')
-  }
-
-  function handleMobileKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (event.key !== 'Enter') return
-    event.preventDefault()
-    handleMobileSend()
   }
 
   return (
@@ -444,30 +523,6 @@ export function TerminalView({
         </form>
       )}
       <div ref={containerRef} className="terminal-container" />
-      <div className="mobile-terminal-input" aria-label="Mobile terminal input">
-        <div className="mobile-terminal-shortcuts">
-          <button type="button" onClick={() => sendTerminalInput('\t')}>Tab</button>
-          <button type="button" onClick={() => sendTerminalInput('\x1b')}>Esc</button>
-          <button type="button" onClick={() => sendTerminalInput('\x03')}>Ctrl+C</button>
-          <button type="button" onClick={() => sendTerminalInput('\r')}>Enter</button>
-        </div>
-        <div className="mobile-terminal-compose">
-          <input
-            type="text"
-            value={mobileInput}
-            onChange={event => setMobileInput(event.target.value)}
-            onKeyDown={handleMobileKeyDown}
-            placeholder="Type command"
-            autoCapitalize="none"
-            autoCorrect="off"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <button type="button" onClick={handleMobileSend} disabled={!mobileInput}>
-            Send
-          </button>
-        </div>
-      </div>
       {showScrollButton && (
         <button
           type="button"
