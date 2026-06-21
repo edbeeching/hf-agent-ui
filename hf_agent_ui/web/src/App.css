@@ -334,18 +334,10 @@
   background: transparent;
 }
 
-.session-action {
-  opacity: 0;
-}
-
-.session-item:hover .session-action,
-.session-item.selected .session-action {
-  opacity: 1;
-}
-
 /* Terminal container */
 .terminal-container {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   padding: 4px;
@@ -647,6 +639,7 @@
   position: relative;
   display: flex;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
   background: #0d1117;
@@ -828,10 +821,6 @@
   color: #e6edf3;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.mobile-terminal-input {
-  display: none;
 }
 
 .session-view-empty {
@@ -1485,10 +1474,6 @@
     font-size: 13px;
   }
 
-  .session-action {
-    opacity: 1;
-  }
-
   .session-daemon {
     max-width: 86px;
     font-size: 11px;
@@ -1511,83 +1496,6 @@
 
   .terminal-container .xterm {
     padding: 4px;
-  }
-
-  .mobile-terminal-input {
-    display: grid;
-    gap: 7px;
-    flex: 0 0 auto;
-    padding: 8px;
-    border-top: 1px solid #30363d;
-    background: #161b22;
-  }
-
-  .mobile-terminal-shortcuts {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
-  }
-
-  .mobile-terminal-compose {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 72px;
-    gap: 7px;
-  }
-
-  .mobile-terminal-input input {
-    width: 100%;
-    min-width: 0;
-    min-height: 42px;
-    padding: 0 11px;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    box-sizing: border-box;
-    background: #0d1117;
-    color: #e6edf3;
-    font: inherit;
-    font-size: 16px;
-  }
-
-  .mobile-terminal-input input:focus {
-    outline: none;
-    border-color: #1f6feb;
-  }
-
-  .mobile-terminal-input button {
-    min-width: 0;
-    min-height: 38px;
-    padding: 0 7px;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    background: #21262d;
-    color: #e6edf3;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .mobile-terminal-input button:disabled {
-    color: #6e7681;
-    cursor: default;
-  }
-
-  .mobile-terminal-compose button {
-    min-height: 42px;
-    border-color: #238636;
-    background: #238636;
-    color: #fff;
-  }
-
-  .mobile-terminal-compose button:disabled {
-    border-color: #30363d;
-    background: #21262d;
-    color: #6e7681;
-  }
-
-  .terminal-scroll-bottom {
-    right: 12px;
-    bottom: 116px;
   }
 
   .screenshot-paste-notice {
