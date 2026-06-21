@@ -42,6 +42,7 @@ function App() {
     sessions,
     worktreeLists,
     ptyOutput,
+    ptyOutputEpoch,
     lastError,
     createPtySession,
     listWorktrees,
@@ -71,6 +72,7 @@ function App() {
     .filter(session => session.needs_input || session.agent_state === 'done').length
 
   const selectedPtyOutput = activeSelected ? ptyOutput.get(activeSelected.sessionId) || [] : []
+  const selectedPtyOutputEpoch = activeSelected ? ptyOutputEpoch.get(activeSelected.sessionId) || 0 : 0
   const newSessionDaemons = newSessionDaemonIds
     ? newSessionDaemonIds.map(id => daemons.find(daemon => daemon.id === id)).filter((daemon): daemon is Daemon => Boolean(daemon))
     : []
@@ -218,6 +220,7 @@ function App() {
           key={activeSelected?.sessionId || 'empty'}
           sessionId={activeSelected?.sessionId || ''}
           output={selectedPtyOutput}
+          outputEpoch={selectedPtyOutputEpoch}
           visible={activeMobileView === 'terminal'}
           needsInput={Boolean(activeSession?.needs_input)}
           inputReason={activeSession?.needs_input_reason || null}
